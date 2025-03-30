@@ -1,3 +1,9 @@
-var x: Int = 10;
-x = x + 1;
-print(x);
+var x: Int;
+var y: Float;
+
+read(x);
+read(y);
+
+val z: Float = x + y * 2.0;
+
+print(z);
