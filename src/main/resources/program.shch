@@ -1,9 +1,6 @@
-var x: Int;
-var y: Float;
-
-read(x);
-read(y);
-
-val z: Float = x +  y * 2.0;
-
-print(z);
+var x: Int = 1;
+if (x > 3) {
+    print(x);
+} else {
+    print(10);
+}

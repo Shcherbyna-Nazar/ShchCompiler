@@ -39,4 +39,5 @@ object LLVMUtils {
         LLVMPositionBuilderAtEnd(builder, entry)
         return LLVMBuildAlloca(builder, type, BytePointer(*("$name\u0000".toByteArray())))
     }
+
 }

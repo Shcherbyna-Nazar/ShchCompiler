@@ -47,9 +47,36 @@ class ShchLLVMCompiler {
             stmt.assignStmt() != null -> compileAssign(stmt.assignStmt())
             stmt.printStmt() != null -> compilePrint(stmt.printStmt())
             stmt.readStmt() != null -> compileRead(stmt.readStmt())
+            stmt.ifStmt() != null -> compileIf(stmt.ifStmt())
+            stmt.whileStmt() != null -> compileWhile(stmt.whileStmt())
             else -> error("Unsupported statement: ${stmt.text}")
         }
     }
+
+    private fun compileWhile(whileStmt: ShchParser.WhileStmtContext) {
+        val function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(builder))
+
+        val condBB = LLVMAppendBasicBlockInContext(context, function, "while.cond")
+        val bodyBB = LLVMAppendBasicBlockInContext(context, function, "while.body")
+        val afterBB = LLVMAppendBasicBlockInContext(context, function, "while.end")
+
+        // Переход к проверке условия
+        LLVMBuildBr(builder, condBB)
+
+        // Условие
+        LLVMPositionBuilderAtEnd(builder, condBB)
+        val condValue = compileCondExpr(whileStmt.expr())
+        LLVMBuildCondBr(builder, condValue, bodyBB, afterBB)
+
+        // Тело цикла
+        LLVMPositionBuilderAtEnd(builder, bodyBB)
+        compileBlock(whileStmt.block())
+        LLVMBuildBr(builder, condBB) // возврат в условие
+
+        // После цикла
+        LLVMPositionBuilderAtEnd(builder, afterBB)
+    }
+
 
     private fun compileVarDecl(decl: ShchParser.VarDeclContext) {
         val name = decl.ID().text
@@ -131,6 +158,7 @@ class ShchLLVMCompiler {
         ctx.op != null -> {
             val left = compileExpr(ctx.expr(0))
             val right = compileExpr(ctx.expr(1))
+
             if (isFloat(left, right)) {
                 val l = promoteToFloat(builder, left, context)
                 val r = promoteToFloat(builder, right, context)
@@ -139,20 +167,75 @@ class ShchLLVMCompiler {
                     "-" -> LLVMBuildFSub(builder, l, r, "fsubtmp")
                     "*" -> LLVMBuildFMul(builder, l, r, "fmultmp")
                     "/" -> LLVMBuildFDiv(builder, l, r, "fdivtmp")
+                    "==" -> LLVMBuildFCmp(builder, LLVMRealOEQ, l, r, "cmptmp")
+                    "!=" -> LLVMBuildFCmp(builder, LLVMRealUNE, l, r, "cmptmp")
+                    "<"  -> LLVMBuildFCmp(builder, LLVMRealOLT, l, r, "cmptmp")
+                    "<=" -> LLVMBuildFCmp(builder, LLVMRealOLE, l, r, "cmptmp")
+                    ">"  -> LLVMBuildFCmp(builder, LLVMRealOGT, l, r, "cmptmp")
+                    ">=" -> LLVMBuildFCmp(builder, LLVMRealOGE, l, r, "cmptmp")
                     else -> error("Unknown float operator: ${ctx.op.text}")
                 }
             } else {
-                when (ctx.op.text) {
+                 when (ctx.op.text) {
                     "+" -> LLVMBuildAdd(builder, left, right, "addtmp")
                     "-" -> LLVMBuildSub(builder, left, right, "subtmp")
                     "*" -> LLVMBuildMul(builder, left, right, "multmp")
                     "/" -> LLVMBuildSDiv(builder, left, right, "divtmp")
+                    "==" -> LLVMBuildICmp(builder, LLVMIntEQ, left, right, "cmptmp")
+                    "!=" -> LLVMBuildICmp(builder, LLVMIntNE, left, right, "cmptmp")
+                    "<"  -> LLVMBuildICmp(builder, LLVMIntSLT, left, right, "cmptmp")
+                    "<=" -> LLVMBuildICmp(builder, LLVMIntSLE, left, right, "cmptmp")
+                    ">"  -> LLVMBuildICmp(builder, LLVMIntSGT, left, right, "cmptmp")
+                    ">=" -> LLVMBuildICmp(builder, LLVMIntSGE, left, right, "cmptmp")
                     else -> error("Unknown integer operator: ${ctx.op.text}")
                 }
             }
         }
+
         else -> compileExpr(ctx.expr(0))
     }
+
+    private fun compileIf(ifStmt: ShchParser.IfStmtContext) {
+        val condValue = compileCondExpr(ifStmt.expr())
+
+        val function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(builder))
+        val thenBB = LLVMAppendBasicBlockInContext(context, function, "if.then")
+        val elseBB = LLVMAppendBasicBlockInContext(context, function, "if.else")
+        val mergeBB = LLVMAppendBasicBlockInContext(context, function, "if.end")
+
+        LLVMBuildCondBr(builder, condValue, thenBB, elseBB)
+
+        // Then block
+        LLVMPositionBuilderAtEnd(builder, thenBB)
+        compileBlock(ifStmt.block(0))
+        LLVMBuildBr(builder, mergeBB)
+
+        // Else block
+        LLVMPositionBuilderAtEnd(builder, elseBB)
+        if (ifStmt.block().size > 1) {
+            compileBlock(ifStmt.block(1))
+        }
+        LLVMBuildBr(builder, mergeBB)
+
+        // Merge block
+        LLVMPositionBuilderAtEnd(builder, mergeBB)
+    }
+
+    private fun compileBlock(block: ShchParser.BlockContext) {
+        for (stmt in block.statement()) {
+            compileStatement(stmt)
+        }
+    }
+
+    private fun compileCondExpr(expr: ShchParser.ExprContext): LLVMValueRef {
+        val value = compileExpr(expr)
+        return when (LLVMGetTypeKind(LLVMTypeOf(value))) {
+            LLVMIntegerTypeKind -> LLVMBuildICmp(builder, LLVMIntNE, value, LLVMConstInt(LLVMTypeOf(value), 0, 0), "ifcond")
+            LLVMDoubleTypeKind -> LLVMBuildFCmp(builder, LLVMRealUNE, value, LLVMConstReal(LLVMTypeOf(value), 0.0), "ifcond")
+            else -> error("Unsupported type for condition")
+        }
+    }
+
     fun saveToFile(path: String) {
         if (compilationFailed) {
             println("⚠️ Skipping IR save due to compilation failure.")
