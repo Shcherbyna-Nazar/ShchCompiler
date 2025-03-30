@@ -1,5 +1,10 @@
 package shch.codegen
 
+import codegen.LLVMUtils.buildGlobalStringPtr
+import codegen.LLVMUtils.createEntryBlockAlloca
+import codegen.LLVMUtils.getLLVMType
+import codegen.LLVMUtils.isFloat
+import codegen.LLVMUtils.promoteToFloat
 import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.llvm.global.LLVM.*
@@ -48,8 +53,8 @@ class ShchLLVMCompiler {
 
     private fun compileVarDecl(decl: ShchParser.VarDeclContext) {
         val name = decl.ID().text
-        val llvmType = getLLVMType(decl.type().text)
-        val alloca = createEntryBlockAlloca(name, llvmType)
+        val llvmType = getLLVMType(context, decl.type().text)
+        val alloca = createEntryBlockAlloca(builder, mainFunc, name, llvmType)
         namedValues[name] = VariableInfo(alloca, llvmType)
 
         decl.expr()?.let {
@@ -82,7 +87,7 @@ class ShchLLVMCompiler {
             1
         )
         val printfFunc = LLVMGetNamedFunction(module, "printf") ?: LLVMAddFunction(module, "printf", printfType)
-        val format = buildGlobalStringPtr(formatStr, "fmt")
+        val format = buildGlobalStringPtr(context, module, builder, formatStr, "fmt")
 
         LLVMBuildCall2(builder, printfType, printfFunc, PointerPointer(format, value), 2, "printfcall")
     }
@@ -106,7 +111,7 @@ class ShchLLVMCompiler {
         )
 
         val scanfFunc = LLVMGetNamedFunction(module, "scanf") ?: LLVMAddFunction(module, "scanf", scanfType)
-        val format = buildGlobalStringPtr(formatStr, "fmt_read")
+        val format = buildGlobalStringPtr(context, module, builder, formatStr, "fmt_read")
 
         LLVMBuildCall2(builder, scanfType, scanfFunc, PointerPointer(format, varInfo.ptr), 2, "scanfcall")
     }
@@ -127,8 +132,8 @@ class ShchLLVMCompiler {
             val left = compileExpr(ctx.expr(0))
             val right = compileExpr(ctx.expr(1))
             if (isFloat(left, right)) {
-                val l = promoteToFloat(left)
-                val r = promoteToFloat(right)
+                val l = promoteToFloat(builder, left, context)
+                val r = promoteToFloat(builder, right, context)
                 when (ctx.op.text) {
                     "+" -> LLVMBuildFAdd(builder, l, r, "faddtmp")
                     "-" -> LLVMBuildFSub(builder, l, r, "fsubtmp")
@@ -148,43 +153,6 @@ class ShchLLVMCompiler {
         }
         else -> compileExpr(ctx.expr(0))
     }
-
-    private fun promoteToFloat(value: LLVMValueRef): LLVMValueRef {
-        val type = LLVMTypeOf(value)
-        return if (LLVMGetTypeKind(type) == LLVMIntegerTypeKind) {
-            LLVMBuildSIToFP(builder, value, LLVMDoubleTypeInContext(context), "intToFloat")
-        } else value
-    }
-
-    private fun getLLVMType(type: String): LLVMTypeRef = when (type) {
-        "Int" -> LLVMInt32TypeInContext(context)
-        "Float" -> LLVMDoubleTypeInContext(context)
-        else -> error("Unsupported type: $type")
-    }
-
-    private fun createEntryBlockAlloca(name: String, type: LLVMTypeRef): LLVMValueRef {
-        val entry = LLVMGetEntryBasicBlock(mainFunc)
-        LLVMPositionBuilderAtEnd(builder, entry)
-        return LLVMBuildAlloca(builder, type, BytePointer(*("$name\u0000".toByteArray()))).also {
-            println("📥 DECLARE — $name (type=$type) -> $it")
-        }
-    }
-
-    private fun buildGlobalStringPtr(str: String, name: String): LLVMValueRef {
-        val strConst = LLVMConstStringInContext(context, str, str.length, 0)
-        val globalVar = LLVMAddGlobal(module, LLVMTypeOf(strConst), name)
-        LLVMSetInitializer(globalVar, strConst)
-        LLVMSetGlobalConstant(globalVar, 1)
-        LLVMSetLinkage(globalVar, LLVMPrivateLinkage)
-        return LLVMBuildPointerCast(builder, globalVar, LLVMPointerType(LLVMInt8TypeInContext(context), 0), "${name}_ptr")
-    }
-
-    private fun isFloat(a: LLVMValueRef, b: LLVMValueRef): Boolean {
-        val t1 = LLVMTypeOf(a)
-        val t2 = LLVMTypeOf(b)
-        return LLVMGetTypeKind(t1) == LLVMDoubleTypeKind || LLVMGetTypeKind(t2) == LLVMDoubleTypeKind
-    }
-
     fun saveToFile(path: String) {
         if (compilationFailed) {
             println("⚠️ Skipping IR save due to compilation failure.")
