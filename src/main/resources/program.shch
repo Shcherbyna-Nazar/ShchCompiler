@@ -4,6 +4,6 @@ var y: Float;
 read(x);
 read(y);
 
-val z: Float = x + y * 2.0;
+val z: Float = x +  ya * 2.0;
 
 print(z);

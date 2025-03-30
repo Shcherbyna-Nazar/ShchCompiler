@@ -40,3 +40,10 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+output
+output.ll
+output.o
+ast.txt
+hs_err*
+src/main/resources/program.shch

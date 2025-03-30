@@ -12,6 +12,7 @@ class ShchLLVMCompiler {
     private val module: LLVMModuleRef = LLVMModuleCreateWithNameInContext("shch_module", context)
     private val builder: LLVMBuilderRef = LLVMCreateBuilderInContext(context)
     private lateinit var mainFunc: LLVMValueRef
+    private var compilationFailed = false
 
     data class VariableInfo(val ptr: LLVMValueRef, val type: LLVMTypeRef)
     private val namedValues = mutableMapOf<String, VariableInfo>()
@@ -23,11 +24,16 @@ class ShchLLVMCompiler {
         val entry = LLVMAppendBasicBlockInContext(context, mainFunc, "entry")
         LLVMPositionBuilderAtEnd(builder, entry)
 
-        for (stmt in tree.statement()) {
-            compileStatement(stmt)
+        try {
+            for (stmt in tree.statement()) {
+                compileStatement(stmt)
+            }
+            LLVMBuildRet(builder, LLVMConstInt(LLVMInt32TypeInContext(context), 0, 0))
+        } catch (e: Exception) {
+            println("❌ Compilation error: ${e.message}")
+            compilationFailed = true
+            LLVMDeleteFunction(mainFunc)
         }
-
-        LLVMBuildRet(builder, LLVMConstInt(LLVMInt32TypeInContext(context), 0, 0))
     }
 
     private fun compileStatement(stmt: ShchParser.StatementContext) {
@@ -36,7 +42,7 @@ class ShchLLVMCompiler {
             stmt.assignStmt() != null -> compileAssign(stmt.assignStmt())
             stmt.printStmt() != null -> compilePrint(stmt.printStmt())
             stmt.readStmt() != null -> compileRead(stmt.readStmt())
-            else -> println("Unsupported statement: ${stmt.text}")
+            else -> error("Unsupported statement: ${stmt.text}")
         }
     }
 
@@ -130,8 +136,7 @@ class ShchLLVMCompiler {
                     "/" -> LLVMBuildFDiv(builder, l, r, "fdivtmp")
                     else -> error("Unknown float operator: ${ctx.op.text}")
                 }
-            }
-            else {
+            } else {
                 when (ctx.op.text) {
                     "+" -> LLVMBuildAdd(builder, left, right, "addtmp")
                     "-" -> LLVMBuildSub(builder, left, right, "subtmp")
@@ -148,9 +153,7 @@ class ShchLLVMCompiler {
         val type = LLVMTypeOf(value)
         return if (LLVMGetTypeKind(type) == LLVMIntegerTypeKind) {
             LLVMBuildSIToFP(builder, value, LLVMDoubleTypeInContext(context), "intToFloat")
-        } else {
-            value
-        }
+        } else value
     }
 
     private fun getLLVMType(type: String): LLVMTypeRef = when (type) {
@@ -183,6 +186,10 @@ class ShchLLVMCompiler {
     }
 
     fun saveToFile(path: String) {
+        if (compilationFailed) {
+            println("⚠️ Skipping IR save due to compilation failure.")
+            return
+        }
         if (LLVMVerifyModule(module, LLVMAbortProcessAction, null as BytePointer?) == 0) {
             LLVMPrintModuleToFile(module, path, null as BytePointer?)
             println("✅ LLVM IR saved: $path")

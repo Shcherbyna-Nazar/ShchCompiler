@@ -1,5 +1,4 @@
-import org.antlr.v4.runtime.CharStreams
-import org.antlr.v4.runtime.CommonTokenStream
+import org.antlr.v4.runtime.*
 import shch.ShchLexer
 import shch.ShchParser
 import shch.codegen.ShchLLVMCompiler
@@ -14,9 +13,25 @@ fun main() {
     val tokens = CommonTokenStream(lexer)
     val parser = ShchParser(tokens)
 
+    // Obsługa błędów składniowych i leksykalnych
+    parser.removeErrorListeners()
+    parser.addErrorListener(object : BaseErrorListener() {
+        override fun syntaxError(
+            recognizer: Recognizer<*, *>?,
+            offendingSymbol: Any?,
+            line: Int,
+            charPositionInLine: Int,
+            msg: String?,
+            e: RecognitionException?
+        ) {
+            System.err.println("❌ Syntax error at $line:$charPositionInLine — $msg")
+            System.exit(1)
+        }
+    })
+
     val tree = parser.program()
 
-    // Save AST to a file
+    // Zapis AST do pliku
     Files.writeString(Paths.get("ast.txt"), tree.toStringTree(parser))
 
     val compiler = ShchLLVMCompiler()
