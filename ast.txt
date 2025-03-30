@@ -1,0 +1,1 @@
+(program (statement (varDecl var x : (type Int) = (expr 10) ;)) (statement (assignStmt x = (expr (expr x) + (expr 1)) ;)) (statement (printStmt print ( (expr x) ) ;)) <EOF>)
