@@ -1,6 +1,8 @@
-var x: Int = 1;
-if (x > 3) {
-    print(x);
-} else {
-    print(10);
-}
+var greeting: String = "Hello, World!";
+print(greeting);
+
+var x: Int = 42;
+print(x);
+
+var pi: Float = 3.14;
+print(pi);

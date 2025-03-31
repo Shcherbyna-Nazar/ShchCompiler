@@ -21,7 +21,7 @@ whileStmt: 'while' '(' expr ')' block;
 
 block: '{' statement* '}';
 
-type: 'Int' | 'Float';
+type: 'Int' | 'Float' | 'String';
 
 expr
     : expr op=('==' | '!=' | '<' | '>' | '<=' | '>=') expr
@@ -29,9 +29,11 @@ expr
     | expr op=('+'|'-') expr
     | '(' expr ')'
     | NUMBER
+    | STRING
     | ID
     ;
 
+STRING: '"' (~["\\] | '\\' .)* '"';
 ID: [a-zA-Z_][a-zA-Z_0-9]*;
 NUMBER: [0-9]+ ('.' [0-9]+)?;
 WS: [ \t\r\n]+ -> skip;

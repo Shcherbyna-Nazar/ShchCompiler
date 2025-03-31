@@ -99,11 +99,14 @@ class ShchLLVMCompiler {
 
     private fun compilePrint(print: ShchParser.PrintStmtContext) {
         val value = compileExpr(print.expr())
-        val formatStr = when (LLVMGetTypeKind(LLVMTypeOf(value))) {
+        val typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+        val formatStr = when (typeKind) {
             LLVMDoubleTypeKind -> "%f\n"
             LLVMIntegerTypeKind -> "%d\n"
+            LLVMPointerTypeKind -> "%s\n" // строки — как указатели
             else -> error("Unsupported type in print")
         }
+
 
         val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
         printfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(context), 0))
@@ -154,6 +157,16 @@ class ShchLLVMCompiler {
             val varInfo = namedValues[ctx.ID().text] ?: error("Variable '${ctx.ID().text}' not declared")
             LLVMBuildLoad2(builder, varInfo.type, varInfo.ptr, BytePointer(*("${ctx.ID().text}\u0000".toByteArray())))
         }
+        ctx.STRING() != null -> {
+            val raw = ctx.STRING().text
+            val text = raw.substring(1, raw.length - 1)
+                .replace("\\n", "\n")
+                .replace("\\t", "\t")
+                .replace("\\\"", "\"")
+            buildGlobalStringPtr(context, module, builder, text, "strtmp")
+        }
+
+
 
         ctx.op != null -> {
             val left = compileExpr(ctx.expr(0))

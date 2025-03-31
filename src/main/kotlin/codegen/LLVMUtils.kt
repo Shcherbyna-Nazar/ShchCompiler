@@ -8,6 +8,7 @@ object LLVMUtils {
     fun getLLVMType(context: LLVMContextRef, type: String): LLVMTypeRef = when (type) {
         "Int" -> LLVMInt32TypeInContext(context)
         "Float" -> LLVMDoubleTypeInContext(context)
+        "String" -> LLVMPointerType(LLVMInt8TypeInContext(context), 0)
         else -> error("Unsupported type: $type")
     }
 
