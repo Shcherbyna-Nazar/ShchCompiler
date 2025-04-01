@@ -2,6 +2,14 @@ grammar Shch;
 
 program: statement* EOF;
 
+COMMENT
+  : '//' ~[\r\n]* -> skip
+  ;
+
+COMMENT_ML
+  : '/*' .*? '*/' -> skip
+  ;
+
 statement
     : varDecl
     | assignStmt

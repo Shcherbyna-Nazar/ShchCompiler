@@ -33,7 +33,7 @@ while ((x > 0) && (y < 100.0)) {
 
     y = y + 10.5;
 }
-
+// This is comment
 print("While loop has ended.\n");
 
 if (y >= 100.0) {
