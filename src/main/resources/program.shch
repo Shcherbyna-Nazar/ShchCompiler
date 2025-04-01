@@ -1,8 +1,45 @@
-var greeting: String = "Hello, World!";
-print(greeting);
+var x: Int = 0;
+var y: Float = 0.0;
 
-var x: Int = 42;
-print(x);
+print("Enter an integer value for x: ");
+read(x);
+print("Enter a float value for y: ");
+read(y);
 
-var pi: Float = 3.14;
-print(pi);
+if ((x == 0) && (y == 0.0)) {
+    print("Both x and y are zero.\n");
+} else {
+    if (x == 0) {
+        print("Only x is zero.\n");
+    } else {
+        if (y == 0.0) {
+            print("Only y is zero.\n");
+        } else {
+            print("Neither x nor y is zero.\n");
+        }
+    }
+}
+
+
+print("Entering the while loop...\n");
+while ((x > 0) && (y < 100.0)) {
+    print("x = ");
+    print(x);
+    print(", y = ");
+    print(y);
+    print("\n");
+
+    x = x - 1;
+
+    y = y + 10.5;
+}
+
+print("While loop has ended.\n");
+
+if (y >= 100.0) {
+    print("y reached at least 100.0.\n");
+} else {
+    print("y is still less than 100.0.\n");
+}
+
+print("Program finished.\n");

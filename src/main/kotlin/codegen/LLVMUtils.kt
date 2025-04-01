@@ -41,4 +41,28 @@ object LLVMUtils {
         return LLVMBuildAlloca(builder, type, BytePointer(*("$name\u0000".toByteArray())))
     }
 
+    fun asBoolean(builder: LLVMBuilderRef, value: LLVMValueRef): LLVMValueRef {
+        val kind = LLVMGetTypeKind(LLVMTypeOf(value))
+        return when (kind) {
+            LLVMIntegerTypeKind -> {
+                // Compare the integer to 0 => yields an i1
+                LLVMBuildICmp(builder, LLVMIntNE,
+                    value,
+                    LLVMConstInt(LLVMTypeOf(value), 0, 0),
+                    "tobool")
+            }
+            LLVMDoubleTypeKind -> {
+                // Compare the double to 0.0 => yields an i1
+                LLVMBuildFCmp(builder, LLVMRealUNE,
+                    value,
+                    LLVMConstReal(LLVMTypeOf(value), 0.0),
+                    "tobool")
+            }
+            // If it's already i1, you could just return it
+            // If it's a pointer/string, you might do NE against null
+            else -> error("Unsupported type for boolean conversion")
+        }
+    }
+
+
 }

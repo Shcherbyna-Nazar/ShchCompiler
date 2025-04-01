@@ -1,5 +1,6 @@
 package shch.codegen
 
+import codegen.LLVMUtils.asBoolean
 import codegen.LLVMUtils.buildGlobalStringPtr
 import codegen.LLVMUtils.createEntryBlockAlloca
 import codegen.LLVMUtils.getLLVMType
@@ -172,6 +173,8 @@ class ShchLLVMCompiler {
             val left = compileExpr(ctx.expr(0))
             val right = compileExpr(ctx.expr(1))
 
+            // If either side is float, handle float ops (you already have that).
+            // Otherwise, handle integer ops. We add two new "logical" ops below.
             if (isFloat(left, right)) {
                 val l = promoteToFloat(builder, left, context)
                 val r = promoteToFloat(builder, right, context)
@@ -186,20 +189,45 @@ class ShchLLVMCompiler {
                     "<=" -> LLVMBuildFCmp(builder, LLVMRealOLE, l, r, "cmptmp")
                     ">"  -> LLVMBuildFCmp(builder, LLVMRealOGT, l, r, "cmptmp")
                     ">=" -> LLVMBuildFCmp(builder, LLVMRealOGE, l, r, "cmptmp")
+
+                    // New:
+                    "&&" -> {
+                        val lBool = asBoolean(builder,l)
+                        val rBool = asBoolean(builder, r)
+                        LLVMBuildAnd(builder, lBool, rBool, "andtmp")
+                    }
+                    "||" -> {
+                        val lBool = asBoolean(builder, l)
+                        val rBool = asBoolean(builder, r)
+                        LLVMBuildOr(builder, lBool, rBool, "ortmp")
+                    }
                     else -> error("Unknown float operator: ${ctx.op.text}")
                 }
             } else {
-                 when (ctx.op.text) {
-                    "+" -> LLVMBuildAdd(builder, left, right, "addtmp")
-                    "-" -> LLVMBuildSub(builder, left, right, "subtmp")
-                    "*" -> LLVMBuildMul(builder, left, right, "multmp")
-                    "/" -> LLVMBuildSDiv(builder, left, right, "divtmp")
+                // integer side
+                when (ctx.op.text) {
+                    "+"  -> LLVMBuildAdd(builder, left, right, "addtmp")
+                    "-"  -> LLVMBuildSub(builder, left, right, "subtmp")
+                    "*"  -> LLVMBuildMul(builder, left, right, "multmp")
+                    "/"  -> LLVMBuildSDiv(builder, left, right, "divtmp")
                     "==" -> LLVMBuildICmp(builder, LLVMIntEQ, left, right, "cmptmp")
                     "!=" -> LLVMBuildICmp(builder, LLVMIntNE, left, right, "cmptmp")
                     "<"  -> LLVMBuildICmp(builder, LLVMIntSLT, left, right, "cmptmp")
                     "<=" -> LLVMBuildICmp(builder, LLVMIntSLE, left, right, "cmptmp")
                     ">"  -> LLVMBuildICmp(builder, LLVMIntSGT, left, right, "cmptmp")
                     ">=" -> LLVMBuildICmp(builder, LLVMIntSGE, left, right, "cmptmp")
+
+                    // New:
+                    "&&" -> {
+                        val lBool = asBoolean(builder, left)
+                        val rBool = asBoolean(builder, right)
+                        LLVMBuildAnd(builder, lBool, rBool, "andtmp")
+                    }
+                    "||" -> {
+                        val lBool = asBoolean(builder, left)
+                        val rBool = asBoolean(builder, right)
+                        LLVMBuildOr(builder, lBool, rBool, "ortmp")
+                    }
                     else -> error("Unknown integer operator: ${ctx.op.text}")
                 }
             }

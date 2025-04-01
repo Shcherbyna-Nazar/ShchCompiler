@@ -27,6 +27,7 @@ expr
     : expr op=('==' | '!=' | '<' | '>' | '<=' | '>=') expr
     | expr op=('*'|'/') expr
     | expr op=('+'|'-') expr
+    | expr op=('&&' | '||') expr
     | '(' expr ')'
     | NUMBER
     | STRING
