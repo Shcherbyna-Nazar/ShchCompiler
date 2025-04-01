@@ -47,6 +47,7 @@ class ShchLLVMCompiler {
             stmt.varDecl() != null -> compileVarDecl(stmt.varDecl())
             stmt.assignStmt() != null -> compileAssign(stmt.assignStmt())
             stmt.printStmt() != null -> compilePrint(stmt.printStmt())
+            stmt.printlnStmt() != null -> compilePrintln(stmt.printlnStmt())
             stmt.readStmt() != null -> compileRead(stmt.readStmt())
             stmt.ifStmt() != null -> compileIf(stmt.ifStmt())
             stmt.whileStmt() != null -> compileWhile(stmt.whileStmt())
@@ -99,15 +100,17 @@ class ShchLLVMCompiler {
     }
 
     private fun compilePrint(print: ShchParser.PrintStmtContext) {
+        // (same logic you already had, but remove the trailing "\n" from the format strings)
         val value = compileExpr(print.expr())
         val typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+
+        // For 'print', we deliberately *do not* add the newline in the format string
         val formatStr = when (typeKind) {
-            LLVMDoubleTypeKind -> "%f\n"
-            LLVMIntegerTypeKind -> "%d\n"
-            LLVMPointerTypeKind -> "%s\n" // строки — как указатели
+            LLVMDoubleTypeKind   -> "%f"       // no \n
+            LLVMIntegerTypeKind  -> "%d"       // no \n
+            LLVMPointerTypeKind  -> "%s"       // no \n (for strings)
             else -> error("Unsupported type in print")
         }
-
 
         val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
         printfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(context), 0))
@@ -117,9 +120,37 @@ class ShchLLVMCompiler {
             1,
             1
         )
-        val printfFunc = LLVMGetNamedFunction(module, "printf") ?: LLVMAddFunction(module, "printf", printfType)
-        val format = buildGlobalStringPtr(context, module, builder, formatStr, "fmt")
+        val printfFunc = LLVMGetNamedFunction(module, "printf")
+            ?: LLVMAddFunction(module, "printf", printfType)
 
+        val format = buildGlobalStringPtr(context, module, builder, formatStr, "fmt")
+        LLVMBuildCall2(builder, printfType, printfFunc, PointerPointer(format, value), 2, "printfcall")
+    }
+
+    private fun compilePrintln(printlnCtx: ShchParser.PrintlnStmtContext) {
+        // Very similar, but we *do* add the newline in the format string
+        val value = compileExpr(printlnCtx.expr())
+        val typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+
+        val formatStr = when (typeKind) {
+            LLVMDoubleTypeKind   -> "%f\n"
+            LLVMIntegerTypeKind  -> "%d\n"
+            LLVMPointerTypeKind  -> "%s\n"
+            else -> error("Unsupported type in println")
+        }
+
+        val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
+        printfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(context), 0))
+        val printfType = LLVMFunctionType(
+            LLVMInt32TypeInContext(context),
+            printfArgTypes,
+            1,
+            1
+        )
+        val printfFunc = LLVMGetNamedFunction(module, "printf")
+            ?: LLVMAddFunction(module, "printf", printfType)
+
+        val format = buildGlobalStringPtr(context, module, builder, formatStr, "fmt_ln")
         LLVMBuildCall2(builder, printfType, printfFunc, PointerPointer(format, value), 2, "printfcall")
     }
 

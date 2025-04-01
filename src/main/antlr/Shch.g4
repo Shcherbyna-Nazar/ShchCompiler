@@ -15,14 +15,18 @@ statement
     | assignStmt
     | readStmt
     | printStmt
+    | printlnStmt
     | ifStmt
     | whileStmt
     ;
 
+printStmt: 'print' '(' expr ')' ';';
+printlnStmt: 'println' '(' expr ')' ';';
+
+
 varDecl: ('var' | 'val') ID ':' type ('=' expr)? ';';
 assignStmt: ID '=' expr ';';
 readStmt: 'read' '(' ID ')' ';';
-printStmt: 'print' '(' expr ')' ';';
 
 ifStmt: 'if' '(' expr ')' block ('else' block)?;
 whileStmt: 'while' '(' expr ')' block;
