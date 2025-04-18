@@ -63,6 +63,12 @@ object LLVMUtils {
             else -> error("Unsupported type for boolean conversion")
         }
     }
-
+    fun boolToInt(
+        value: LLVMValueRef,
+        builder: LLVMBuilderRef,
+        context: LLVMContextRef
+    ): LLVMValueRef {
+        return LLVMBuildZExt(builder, value, LLVMInt32TypeInContext(context), "booltoint")
+    }
 
 }
