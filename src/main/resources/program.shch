@@ -1,21 +1,5 @@
-var a: Boolean = true;
-var b: Boolean = false;
-var aa: Boolean = !a;
-
-if (aa == false) { println("OK"); } else { println("FAIL"); }
-if (!a == false) { println("OK"); } else { println("FAIL"); }
-if (!b == true) { println("OK"); } else { println("FAIL"); }
-
-if (a & a == true) { println("OK"); } else { println("FAIL"); }
-if (a & b == false) { println("OK"); } else { println("FAIL"); }
-if (b & b == false) { println("OK"); } else { println("FAIL"); }
-
-if (a | a == true) { println("OK"); } else { println("FAIL"); }
-if (a | b == true) { println("OK"); } else { println("FAIL"); }
-if (b | b == false) { println("OK"); } else { println("FAIL"); }
-
-if (a ^ a == false) { println("OK"); } else { println("FAIL"); }
-if (a ^ b == true) { println("OK"); } else { println("FAIL"); }
-if (b ^ b == false) { println("OK"); } else { println("FAIL"); }
-if (a ^ true == false) { println("OK"); } else { println("FAIL"); }
-if (b ^ true == true) { println("OK"); } else { println("FAIL"); }
+var a: Int = 2;
+var b: Int = 3;
+if (((a + b) == 5) && (a < b)) {
+    println("logic ok");
+}

@@ -207,6 +207,10 @@ class ShchLLVMCompiler {
     }
 
     private fun compileExpr(ctx: ShchParser.ExprContext): LLVMValueRef {
+        if (ctx.op?.text == "&&" || ctx.op?.text == "||") {
+            return compileCondExpr(ctx)
+        }
+
 
         return when {
             ctx.TRUE() != null -> LLVMConstInt(LLVMInt1TypeInContext(context), 1, 0)
@@ -323,6 +327,26 @@ class ShchLLVMCompiler {
 
                             LLVMBuildSDiv(builder, l, r, "divtmp")
                         }
+                        "%" -> {
+                            var l = left
+                            var r = right
+
+                            if (LLVMGetTypeKind(LLVMTypeOf(l)) == LLVMIntegerTypeKind &&
+                                LLVMGetIntTypeWidth(LLVMTypeOf(l)) == 1) {
+                                l = boolToInt(l, builder, context)
+                            }
+                            if (LLVMGetTypeKind(LLVMTypeOf(r)) == LLVMIntegerTypeKind &&
+                                LLVMGetIntTypeWidth(LLVMTypeOf(r)) == 1) {
+                                r = boolToInt(r, builder, context)
+                            }
+
+                            if (LLVMGetTypeKind(LLVMTypeOf(l)) != LLVMIntegerTypeKind ||
+                                LLVMGetTypeKind(LLVMTypeOf(r)) != LLVMIntegerTypeKind) {
+                                error("Operands to '%' must be both Int")
+                            }
+
+                            LLVMBuildSRem(builder, l, r, "modtmp")
+                        }
 
                         "==" -> LLVMBuildICmp(builder, LLVMIntEQ, left, right, "cmptmp")
                         "!=" -> LLVMBuildICmp(builder, LLVMIntNE, left, right, "cmptmp")
@@ -335,7 +359,17 @@ class ShchLLVMCompiler {
                 }
             }
 
-            else -> compileExpr(ctx.expr(0))
+            else -> {
+                if (ctx.expr().size == 1) {
+                    val subExpr = ctx.expr(0)
+                    if (subExpr.op?.text == "&&" || subExpr.op?.text == "||") {
+                        return compileCondExpr(subExpr)
+                    }
+                    return compileExpr(subExpr)
+                }
+                error("Unhandled expression: ${ctx.text}")
+            }
+
         }
     }
 
