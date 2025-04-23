@@ -1,8 +1,21 @@
-var count: Int = 0;
-var max: Int = 10000;
+var a: Boolean = true;
+var b: Boolean = false;
+var aa: Boolean = !a;
 
-while (count < max) {
-    count = count + 1;
-}
+if (aa == false) { println("OK"); } else { println("FAIL"); }
+if (!a == false) { println("OK"); } else { println("FAIL"); }
+if (!b == true) { println("OK"); } else { println("FAIL"); }
 
-println(count); // 10000
+if (a & a == true) { println("OK"); } else { println("FAIL"); }
+if (a & b == false) { println("OK"); } else { println("FAIL"); }
+if (b & b == false) { println("OK"); } else { println("FAIL"); }
+
+if (a | a == true) { println("OK"); } else { println("FAIL"); }
+if (a | b == true) { println("OK"); } else { println("FAIL"); }
+if (b | b == false) { println("OK"); } else { println("FAIL"); }
+
+if (a ^ a == false) { println("OK"); } else { println("FAIL"); }
+if (a ^ b == true) { println("OK"); } else { println("FAIL"); }
+if (b ^ b == false) { println("OK"); } else { println("FAIL"); }
+if (a ^ true == false) { println("OK"); } else { println("FAIL"); }
+if (b ^ true == true) { println("OK"); } else { println("FAIL"); }

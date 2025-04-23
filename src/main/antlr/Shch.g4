@@ -33,20 +33,29 @@
 
     block: '{' statement* '}';
 
-    type: 'Int' | 'Float' | 'String';
+   type: 'Int' | 'Float' | 'String' | 'Boolean';
 
-    expr
-        : expr op=('==' | '!=' | '<' | '>' | '<=' | '>=') expr
-        | expr op=('*'|'/') expr
-        | expr op=('+'|'-') expr
-        | expr op=('&&' | '||') expr
-        | '(' expr ')'
-        | NUMBER
-        | STRING
-        | ID
-        ;
+expr
+    : not='!' expr
+    | expr op='&' expr
+    | expr op='^' expr
+    | expr op='|' expr
+    | expr op=('&&' | '||') expr
+    | expr op=('==' | '!=' | '<' | '>' | '<=' | '>=') expr
+    | expr op=('*'|'/') expr
+    | expr op=('+'|'-') expr
+    | '(' expr ')'
+    | NUMBER
+    | STRING
+    | ID
+    | 'true'
+    | 'false'
+    ;
 
-    STRING: '"' (~["\\] | '\\' .)* '"';
+
+    TRUE: 'true';
+    FALSE: 'false';
     ID: [a-zA-Z_][a-zA-Z_0-9]*;
     NUMBER: [0-9]+ ('.' [0-9]+)?;
+    STRING: '"' (~["\\] | '\\' .)* '"';
     WS: [ \t\r\n]+ -> skip;

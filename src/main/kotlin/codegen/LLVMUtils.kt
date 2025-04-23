@@ -9,6 +9,7 @@ object LLVMUtils {
         "Int" -> LLVMInt32TypeInContext(context)
         "Float" -> LLVMDoubleTypeInContext(context)
         "String" -> LLVMPointerType(LLVMInt8TypeInContext(context), 0)
+        "Boolean" -> LLVMInt1TypeInContext(context)
         else -> error("Unsupported type: $type")
     }
 
