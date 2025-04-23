@@ -96,6 +96,7 @@ class ShchLLVMCompiler {
     private fun compileVarDecl(decl: ShchParser.VarDeclContext) {
         val name = decl.ID().text
         val llvmType = getLLVMType(context, decl.type().text)
+
         val alloca = createEntryBlockAlloca(builder, mainFunc, name, llvmType)
         namedValues[name] = VariableInfo(alloca, llvmType)
 
@@ -114,8 +115,13 @@ class ShchLLVMCompiler {
 
     private fun compilePrint(print: ShchParser.PrintStmtContext) {
         // (same logic you already had, but remove the trailing "\n" from the format strings)
-        val value = compileExpr(print.expr())
-        val typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+        var value = compileExpr(print.expr())
+        var typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+
+        if (typeKind == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(LLVMTypeOf(value)) == 1) {
+            value = LLVMBuildZExt(builder, value, LLVMInt32TypeInContext(context), "booltoint")
+            typeKind = LLVMIntegerTypeKind // теперь это точно целое число i32
+        }
 
         // For 'print', we deliberately *do not* add the newline in the format string
         val formatStr = when (typeKind) {
@@ -141,9 +147,16 @@ class ShchLLVMCompiler {
     }
 
     private fun compilePrintln(printlnCtx: ShchParser.PrintlnStmtContext) {
-        // Very similar, but we *do* add the newline in the format string
-        val value = compileExpr(printlnCtx.expr())
-        val typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+        var value = compileExpr(printlnCtx.expr())
+        var typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+
+
+        if (typeKind == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(LLVMTypeOf(value)) == 1) {
+
+            value = LLVMBuildZExt(builder, value, LLVMInt32TypeInContext(context), "booltoint")
+            typeKind = LLVMIntegerTypeKind // теперь это точно целое число i32
+        }
+
 
         val formatStr = when (typeKind) {
             LLVMDoubleTypeKind   -> "%f\n"
@@ -151,6 +164,7 @@ class ShchLLVMCompiler {
             LLVMPointerTypeKind  -> "%s\n"
             else -> error("Unsupported type in println")
         }
+
 
         val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
         printfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(context), 0))
@@ -166,6 +180,7 @@ class ShchLLVMCompiler {
         val format = buildGlobalStringPtr(context, module, builder, formatStr, "fmt_ln")
         LLVMBuildCall2(builder, printfType, printfFunc, PointerPointer(format, value), 2, "printfcall")
     }
+
 
     private fun compileRead(readStmt: ShchParser.ReadStmtContext) {
         val name = readStmt.ID().text
@@ -193,7 +208,49 @@ class ShchLLVMCompiler {
 
     private fun compileExpr(ctx: ShchParser.ExprContext): LLVMValueRef {
 
+        println("📌 compileExpr: ${ctx.text}, op=${ctx.op?.text}")
+
         return when {
+            ctx.TRUE() != null -> LLVMConstInt(LLVMInt1TypeInContext(context), 1, 0)
+
+            ctx.FALSE() != null -> LLVMConstInt(LLVMInt1TypeInContext(context), 0, 0)
+
+            ctx.not != null && ctx.not.text == "!" -> {
+                val value = compileCondExpr(ctx.expr(0))
+                val valueType = LLVMTypeOf(value)
+
+
+                val i1Value = when {
+                    LLVMGetTypeKind(valueType) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(valueType) == 1 -> value
+                    LLVMGetTypeKind(valueType) == LLVMIntegerTypeKind ->
+                        LLVMBuildICmp(builder, LLVMIntNE, value, LLVMConstInt(valueType, 0, 0), "boolify")
+                    LLVMGetTypeKind(valueType) == LLVMDoubleTypeKind ->
+                        LLVMBuildFCmp(builder, LLVMRealUNE, value, LLVMConstReal(valueType, 0.0), "boolify")
+                    else -> error("Unsupported type for '!' operator: $valueType")
+                }
+
+                val result = LLVMBuildXor(builder, i1Value, LLVMConstInt(LLVMInt1TypeInContext(context), 1, 0), "nottmp")
+                result
+            }
+
+
+            ctx.op != null && ctx.op.text in setOf("&", "|", "^") -> {
+                val left = compileCondExpr(ctx.expr(0))
+                val right = compileCondExpr(ctx.expr(1))
+
+                println("📌 compile logical '${ctx.op.text}': left=${LLVMPrintValueToString(left).string}, right=${LLVMPrintValueToString(right).string}")
+
+                val result = when (ctx.op.text) {
+                    "&" -> LLVMBuildAnd(builder, left, right, "andtmp")
+                    "|" -> LLVMBuildOr(builder, left, right, "ortmp")
+                    "^" -> LLVMBuildXor(builder, left, right, "xortmp")
+                    else -> error("Unknown boolean operator: ${ctx.op.text}")
+                }
+
+                result
+            }
+
+
             ctx.NUMBER() != null && ctx.NUMBER().text.contains(".") ->
                 LLVMConstReal(LLVMDoubleTypeInContext(context), ctx.NUMBER().text.toDouble())
 
@@ -222,7 +279,6 @@ class ShchLLVMCompiler {
                     var l = promoteToFloat(builder, left, context)
                     var r = promoteToFloat(builder, right, context)
 
-                    // Обрабатываем возможный bool (i1), например, из сравнения
                     if (LLVMGetTypeKind(LLVMTypeOf(l)) == LLVMIntegerTypeKind &&
                         LLVMGetIntTypeWidth(LLVMTypeOf(l)) == 1) {
                         l = LLVMBuildUIToFP(builder, l, LLVMDoubleTypeInContext(context), "booltofloat_l")
@@ -298,27 +354,20 @@ class ShchLLVMCompiler {
 
         val result = LLVMBuildAlloca(builder, LLVMInt1TypeInContext(context), "sc.tmp")
 
-        // Скомпилируем левую часть
         val lhsValue = compileCondExpr(lhsExpr)
 
         if (op == "&&") {
-            // если lhs == false → переход сразу в end
             LLVMBuildCondBr(builder, lhsValue, evalRhsBB, endBB)
         } else {
-            // op == "||" → если lhs == true → переход сразу в end
             LLVMBuildCondBr(builder, lhsValue, endBB, evalRhsBB)
         }
 
-        // evalRhsBB
         LLVMPositionBuilderAtEnd(builder, evalRhsBB)
         val rhsValue = compileCondExpr(rhsExpr)
         LLVMBuildStore(builder, rhsValue, result)
         LLVMBuildBr(builder, endBB)
-
-        // endBB
         LLVMPositionBuilderAtEnd(builder, endBB)
 
-        // Вставим lhs как default значение (если переход сюда был без вычисления RHS)
         LLVMBuildStore(builder, lhsValue, result)
 
         return LLVMBuildLoad2(builder, LLVMInt1TypeInContext(context), result, "scload")
@@ -347,9 +396,7 @@ class ShchLLVMCompiler {
         } else false
         if (!elseHasTerminator) LLVMBuildBr(builder, mergeBB)
 
-        // Merge block
         LLVMPositionBuilderAtEnd(builder, mergeBB)
-        // 🚨 IMPORTANT: REMOVE forced return here, merge block should NEVER implicitly terminate!
     }
 
 
@@ -363,16 +410,28 @@ class ShchLLVMCompiler {
 
 
     private fun compileCondExpr(expr: ShchParser.ExprContext): LLVMValueRef {
+
         if (expr.op != null && (expr.op.text == "&&" || expr.op.text == "||")) {
-            return compileShortCircuit(expr)
+            val result = compileShortCircuit(expr)
+            return result
         }
 
         val value = compileExpr(expr)
-        return when (LLVMGetTypeKind(LLVMTypeOf(value))) {
-            LLVMIntegerTypeKind -> LLVMBuildICmp(builder, LLVMIntNE, value, LLVMConstInt(LLVMTypeOf(value), 0, 0), "ifcond")
-            LLVMDoubleTypeKind -> LLVMBuildFCmp(builder, LLVMRealUNE, value, LLVMConstReal(LLVMTypeOf(value), 0.0), "ifcond")
-            else -> error("Unsupported type for condition")
+        val type = LLVMTypeOf(value)
+
+
+        val result = when {
+            LLVMGetTypeKind(type) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(type) == 1 ->
+                value
+            LLVMGetTypeKind(type) == LLVMIntegerTypeKind ->
+                LLVMBuildICmp(builder, LLVMIntNE, value, LLVMConstInt(type, 0, 0), "ifcond")
+            LLVMGetTypeKind(type) == LLVMDoubleTypeKind ->
+                LLVMBuildFCmp(builder, LLVMRealUNE, value, LLVMConstReal(type, 0.0), "ifcond")
+            else ->
+                error("Unsupported type for condition")
         }
+
+        return result
     }
 
 
