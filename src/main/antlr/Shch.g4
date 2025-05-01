@@ -37,6 +37,7 @@
 
 expr
     : not='!' expr
+    | sign='-' expr
     | expr op='&' expr
     | expr op='^' expr
     | expr op='|' expr
@@ -51,6 +52,7 @@ expr
     | 'true'
     | 'false'
     ;
+
 
 
     TRUE: 'true';

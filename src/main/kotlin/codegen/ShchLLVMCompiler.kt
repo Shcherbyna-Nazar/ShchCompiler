@@ -186,31 +186,65 @@ class ShchLLVMCompiler {
         val name = readStmt.ID().text
         val varInfo = namedValues[name] ?: error("Variable '$name' not declared")
 
-        val formatStr = when (LLVMGetTypeKind(varInfo.type)) {
+        val typeKind = LLVMGetTypeKind(varInfo.type)
+        val formatStr = when (typeKind) {
             LLVMIntegerTypeKind -> "%d"
-            LLVMDoubleTypeKind -> "%lf"
+            LLVMDoubleTypeKind  -> "%lf"
+            LLVMPointerTypeKind -> "%255s" // ограничим ввод
             else -> error("Unsupported type for read")
         }
-        val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
-        printfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(context), 0))
+
+        // Prepare scanf function
+        val scanfArgTypes = PointerPointer<LLVMTypeRef>(1)
+        scanfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(context), 0))
         val scanfType = LLVMFunctionType(
             LLVMInt32TypeInContext(context),
-            printfArgTypes,
+            scanfArgTypes,
             1,
             1
         )
-
         val scanfFunc = LLVMGetNamedFunction(module, "scanf") ?: LLVMAddFunction(module, "scanf", scanfType)
         val format = buildGlobalStringPtr(context, module, builder, formatStr, "fmt_read")
 
-        LLVMBuildCall2(builder, scanfType, scanfFunc, PointerPointer(format, varInfo.ptr), 2, "scanfcall")
+        val args = when (typeKind) {
+            LLVMPointerTypeKind -> {
+                // Alloca: stack buffer [256 x i8]
+                val arrayType = LLVMArrayType(LLVMInt8TypeInContext(context), 256)
+                val bufferAlloca = LLVMBuildAlloca(builder, arrayType, "strbuf.alloca")
+
+                // Cast [256 x i8]* → i8*
+                val bufferPtr = LLVMBuildBitCast(
+                    builder,
+                    bufferAlloca,
+                    LLVMPointerType(LLVMInt8TypeInContext(context), 0),
+                    "strbuf.ptr"
+                )
+
+                // Store pointer to variable
+                LLVMBuildStore(builder, bufferPtr, varInfo.ptr)
+
+                PointerPointer(format, bufferPtr)
+            }
+
+            else -> PointerPointer(format, varInfo.ptr)
+        }
+
+        LLVMBuildCall2(builder, scanfType, scanfFunc, args, 2, "scanfcall")
     }
 
     private fun compileExpr(ctx: ShchParser.ExprContext): LLVMValueRef {
         if (ctx.op?.text == "&&" || ctx.op?.text == "||") {
             return compileCondExpr(ctx)
         }
-
+        if (ctx.sign?.text == "-") {
+            val value = compileExpr(ctx.expr(0))
+            val type = LLVMTypeOf(value)
+            return when (LLVMGetTypeKind(type)) {
+                LLVMDoubleTypeKind -> LLVMBuildFNeg(builder, value, "fnegtmp")
+                LLVMIntegerTypeKind -> LLVMBuildNeg(builder, value, "inegtmp")
+                else -> error("Unsupported type for unary minus")
+            }
+        }
 
         return when {
             ctx.TRUE() != null -> LLVMConstInt(LLVMInt1TypeInContext(context), 1, 0)
