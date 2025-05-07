@@ -18,7 +18,7 @@ val antlrOutputDir = "build/generated-src/antlr/main"
 
 val generateGrammarSource by tasks.registering(JavaExec::class) {
     group = "build"
-    description = "Generuje parser ANTLR"
+    description = "Generates ANTLR parser"
     inputs.file("src/main/antlr/Shch.g4")
     outputs.dir(antlrOutputDir)
     classpath = configurations.detachedConfiguration(
@@ -35,9 +35,12 @@ val generateGrammarSource by tasks.registering(JavaExec::class) {
 
 sourceSets["main"].java.srcDirs("build/generated-src/antlr/main", "src/main/kotlin")
 
-
-tasks.named("compileKotlin") {
+tasks.named("compileKotlin").configure {
     dependsOn(generateGrammarSource)
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 application {

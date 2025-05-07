@@ -6,6 +6,7 @@ import codegen.LLVMUtils.createEntryBlockAlloca
 import codegen.LLVMUtils.getLLVMType
 import codegen.LLVMUtils.isFloat
 import codegen.LLVMUtils.promoteToFloat
+import codegen.ValueWithBlock
 import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.llvm.LLVM.*
@@ -39,7 +40,6 @@ class ShchLLVMCompiler {
                 }
                 compileStatement(stmt)
             }
-
 
             // 🛠 Проверяем, нужен ли терминатор
             val currentBB = LLVMGetInsertBlock(builder)
@@ -233,6 +233,15 @@ class ShchLLVMCompiler {
     }
 
     private fun compileExpr(ctx: ShchParser.ExprContext): LLVMValueRef {
+        if (ctx.assign != null) {
+            val name = ctx.ID().text
+            val varInfo = namedValues[name] ?: error("Variable '$name' not declared")
+            val value = compileExpr(ctx.expr(0))
+            LLVMBuildStore(builder, value, varInfo.ptr)
+            return value // return assigned value
+        }
+
+
         if (ctx.op?.text == "&&" || ctx.op?.text == "||") {
             return compileCondExpr(ctx)
         }
@@ -407,36 +416,59 @@ class ShchLLVMCompiler {
         }
     }
 
-    private fun compileShortCircuit(ctx: ShchParser.ExprContext): LLVMValueRef {
-        val lhsExpr = ctx.expr(0)
-        val rhsExpr = ctx.expr(1)
-        val op = ctx.op.text
+    private fun compileShortCircuit(ctx: ShchParser.ExprContext): ValueWithBlock {
+        val lhsResult = compileCondExprWithBlock(ctx.expr(0))
+        val lhsValue = lhsResult.value
+        val lhsBlock = lhsResult.block
 
-        val function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(builder))
-
-        val evalRhsBB = LLVMAppendBasicBlockInContext(context, function, "sc.rhs")
+        val function = LLVMGetBasicBlockParent(lhsBlock)
+        val rhsBB = LLVMAppendBasicBlockInContext(context, function, "sc.rhs")
         val endBB = LLVMAppendBasicBlockInContext(context, function, "sc.end")
 
-        val result = LLVMBuildAlloca(builder, LLVMInt1TypeInContext(context), "sc.tmp")
-
-        val lhsValue = compileCondExpr(lhsExpr)
-
-        if (op == "&&") {
-            LLVMBuildCondBr(builder, lhsValue, evalRhsBB, endBB)
+        // Переход из lhs в зависимости от оператора
+        LLVMPositionBuilderAtEnd(builder, lhsBlock)
+        if (ctx.op.text == "&&") {
+            LLVMBuildCondBr(builder, lhsValue, rhsBB, endBB)
         } else {
-            LLVMBuildCondBr(builder, lhsValue, endBB, evalRhsBB)
+            LLVMBuildCondBr(builder, lhsValue, endBB, rhsBB)
         }
 
-        LLVMPositionBuilderAtEnd(builder, evalRhsBB)
-        val rhsValue = compileCondExpr(rhsExpr)
-        LLVMBuildStore(builder, rhsValue, result)
+        // RHS
+        LLVMPositionBuilderAtEnd(builder, rhsBB)
+        val rhsResult = compileCondExprWithBlock(ctx.expr(1))
+        val rhsValue = rhsResult.value
+        val rhsBlock = rhsResult.block
         LLVMBuildBr(builder, endBB)
+
+        // PHI
         LLVMPositionBuilderAtEnd(builder, endBB)
+        val phi = LLVMBuildPhi(builder, LLVMInt1TypeInContext(context), "scphi")
 
-        LLVMBuildStore(builder, lhsValue, result)
+        val values = PointerPointer<LLVMValueRef>(2)
+        val blocks = PointerPointer<LLVMBasicBlockRef>(2)
 
-        return LLVMBuildLoad2(builder, LLVMInt1TypeInContext(context), result, "scload")
+        // ✅ Точное соответствие переходов
+        if (ctx.op.text == "&&") {
+            values.put(0, LLVMConstInt(LLVMInt1TypeInContext(context), 0, 0)) // short-circuit
+            blocks.put(0, lhsBlock)
+
+            values.put(1, rhsValue)
+            blocks.put(1, rhsBlock)
+        } else {
+            values.put(0, LLVMConstInt(LLVMInt1TypeInContext(context), 1, 0)) // short-circuit
+            blocks.put(0, lhsBlock)
+
+            values.put(1, rhsValue)
+            blocks.put(1, rhsBlock)
+        }
+
+        LLVMAddIncoming(phi, values, blocks, 2)
+
+        return ValueWithBlock(phi, endBB)
     }
+
+
+
 
 
     private fun compileIf(ifStmt: ShchParser.IfStmtContext) {
@@ -475,29 +507,28 @@ class ShchLLVMCompiler {
 
 
     private fun compileCondExpr(expr: ShchParser.ExprContext): LLVMValueRef {
+        val result = compileCondExprWithBlock(expr)
+        return result.value
+    }
 
-        if (expr.op != null && (expr.op.text == "&&" || expr.op.text == "||")) {
-            val result = compileShortCircuit(expr)
-            return result
+    private fun compileCondExprWithBlock(expr: ShchParser.ExprContext): ValueWithBlock {
+        if (expr.op?.text == "&&" || expr.op?.text == "||") {
+            return compileShortCircuit(expr)
         }
 
         val value = compileExpr(expr)
         val type = LLVMTypeOf(value)
 
-
         val result = when {
-            LLVMGetTypeKind(type) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(type) == 1 ->
-                value
-            LLVMGetTypeKind(type) == LLVMIntegerTypeKind ->
-                LLVMBuildICmp(builder, LLVMIntNE, value, LLVMConstInt(type, 0, 0), "ifcond")
-            LLVMGetTypeKind(type) == LLVMDoubleTypeKind ->
-                LLVMBuildFCmp(builder, LLVMRealUNE, value, LLVMConstReal(type, 0.0), "ifcond")
-            else ->
-                error("Unsupported type for condition")
+            LLVMGetTypeKind(type) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(type) == 1 -> value
+            LLVMGetTypeKind(type) == LLVMIntegerTypeKind -> LLVMBuildICmp(builder, LLVMIntNE, value, LLVMConstInt(type, 0, 0), "boolify")
+            LLVMGetTypeKind(type) == LLVMDoubleTypeKind -> LLVMBuildFCmp(builder, LLVMRealUNE, value, LLVMConstReal(type, 0.0), "boolify")
+            else -> error("Unsupported type for condition")
         }
 
-        return result
+        return ValueWithBlock(result, LLVMGetInsertBlock(builder))
     }
+
 
 
     fun saveToFile(path: String) {

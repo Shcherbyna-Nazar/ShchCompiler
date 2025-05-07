@@ -36,7 +36,8 @@
    type: 'Int' | 'Float' | 'String' | 'Boolean';
 
 expr
-    : not='!' expr
+    : ID assign='=' expr
+    | not='!' expr
     | sign='-' expr
     | expr op='&' expr
     | expr op='^' expr

@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Colors for nicer output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[1;36m'
+YELLOW='\033[1;33m'
+RESET='\033[0m'
+
+# Check argument
+if [[ $# -lt 1 ]]; then
+  echo -e "${RED}❌ Error: No input file provided.${RESET}"
+  echo "Usage: ./compile_and_run.sh <source_file.shch>"
+  exit 1
+fi
+
+INPUT_FILE="$1"
+BASENAME=$(basename "$INPUT_FILE" .shch)
+BUILD_DIR="build"
+LLVM_FILE="$BUILD_DIR/$BASENAME.ll"
+OBJ_FILE="$BUILD_DIR/$BASENAME.o"
+EXEC_FILE="$BUILD_DIR/$BASENAME"
+AST_FILE="$BUILD_DIR/$BASENAME.ast.txt"
+
+# Ensure build directory exists
+mkdir -p "$BUILD_DIR"
+
+# Step 1: Compile .shch → .ll using Kotlin/LLVM compiler
+echo -e "${CYAN}🛠 Compiling '$INPUT_FILE' to LLVM IR...${RESET}"
+./gradlew -q run --args="$INPUT_FILE $LLVM_FILE $AST_FILE"
+
+# Step 2: LLVM IR → object file (.o)
+echo -e "${CYAN}🔧 Generating object file (.o)...${RESET}"
+llc "$LLVM_FILE" -filetype=obj -relocation-model=pic -o "$OBJ_FILE"
+
+# Step 3: Link object file → executable
+echo -e "${CYAN}📦 Linking object file to executable...${RESET}"
+clang "$OBJ_FILE" -o "$EXEC_FILE"
+
+# Step 4: Run the executable
+echo -e "${GREEN}🚀 Running compiled program:${RESET}"
+echo -e "${YELLOW}=========================================${RESET}"
+"$EXEC_FILE"
+echo -e "${YELLOW}=========================================${RESET}"
+
+exit 0

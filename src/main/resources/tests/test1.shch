@@ -1,0 +1,2 @@
+var x: Int = 10;
+println(x);
