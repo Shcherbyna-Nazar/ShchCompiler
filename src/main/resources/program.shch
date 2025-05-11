@@ -1,8 +1,0 @@
-var x: Int = 0;
-var y: Int = 0;
-if ((x == 1) && (x == 1) && ((y = 1) == 1)) {
-    println("bad");
-} else {
-    println("ok");
-}
-println(y);

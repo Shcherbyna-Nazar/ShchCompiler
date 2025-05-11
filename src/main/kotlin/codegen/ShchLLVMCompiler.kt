@@ -1,12 +1,13 @@
 package shch.codegen
 
-import codegen.LLVMUtils.boolToInt
-import codegen.LLVMUtils.buildGlobalStringPtr
-import codegen.LLVMUtils.createEntryBlockAlloca
-import codegen.LLVMUtils.getLLVMType
-import codegen.LLVMUtils.isFloat
-import codegen.LLVMUtils.promoteToFloat
-import codegen.ValueWithBlock
+import codegen.utils.LLVMUtils.boolToInt
+import codegen.utils.LLVMUtils.buildGlobalStringPtr
+import codegen.utils.LLVMUtils.createEntryBlockAlloca
+import codegen.utils.LLVMUtils.getLLVMType
+import codegen.utils.LLVMUtils.isFloat
+import codegen.utils.LLVMUtils.promoteToFloat
+import codegen.data.ValueWithBlock
+import codegen.data.VariableInfo
 import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.llvm.LLVM.*
@@ -21,7 +22,6 @@ class ShchLLVMCompiler {
     private lateinit var mainFunc: LLVMValueRef
     private var compilationFailed = false
 
-    data class VariableInfo(val ptr: LLVMValueRef, val type: LLVMTypeRef)
     private val namedValues = mutableMapOf<String, VariableInfo>()
 
     fun compile(tree: ShchParser.ProgramContext) {
@@ -41,7 +41,6 @@ class ShchLLVMCompiler {
                 compileStatement(stmt)
             }
 
-            // 🛠 Проверяем, нужен ли терминатор
             val currentBB = LLVMGetInsertBlock(builder)
             val terminator = LLVMGetBasicBlockTerminator(currentBB)
             if (terminator == null || terminator.isNull) {
@@ -54,7 +53,7 @@ class ShchLLVMCompiler {
             LLVMDeleteFunction(mainFunc)
         }
     }
-
+g
 
     private fun compileStatement(stmt: ShchParser.StatementContext) {
         when {
@@ -190,7 +189,7 @@ class ShchLLVMCompiler {
         val formatStr = when (typeKind) {
             LLVMIntegerTypeKind -> "%d"
             LLVMDoubleTypeKind  -> "%lf"
-            LLVMPointerTypeKind -> "%255s" // ограничим ввод
+            LLVMPointerTypeKind -> "%255s"
             else -> error("Unsupported type for read")
         }
 

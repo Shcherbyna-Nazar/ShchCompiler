@@ -1,4 +1,4 @@
-package codegen
+package codegen.utils
 
 import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.llvm.LLVM.*

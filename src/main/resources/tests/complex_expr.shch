@@ -1,0 +1,3 @@
+var x: Int = 2;
+println((x + 3) * (x - 1));
+println(d);

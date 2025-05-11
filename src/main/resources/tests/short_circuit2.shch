@@ -1,0 +1,7 @@
+var a: Boolean = true;
+var b: Boolean = false;
+var c: Boolean = true;
+
+if (!(a && b) || c) {
+  println("logic ok");
+}

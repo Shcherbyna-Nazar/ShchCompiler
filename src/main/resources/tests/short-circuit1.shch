@@ -1,0 +1,9 @@
+var a: Boolean = false;
+var b: Boolean = true;
+
+if (a && (b = false)) {
+  println("fail");
+} else {
+  println("short-circuit ok");
+}
+println(b); // should be true

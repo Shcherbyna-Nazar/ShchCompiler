@@ -1,0 +1,3 @@
+var x: Int = 5;
+var y: Int = 7;
+println(x + y * 2);

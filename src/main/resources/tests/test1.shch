@@ -1,2 +1,4 @@
 var x: Int = 10;
+var pi: Float = 3.14;
 println(x);
+println(pi);
