@@ -1,3 +1,0 @@
-var x: Int = 0;
-println((x = 5) + 1);
-println(x);

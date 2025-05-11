@@ -1,4 +1,0 @@
-var name: String;
-read(name);
-println("Your name is:");
-println(name);
