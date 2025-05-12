@@ -52,7 +52,7 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
 
         if (expr.assign != null) {
             val name = expr.ID().text
-            val varInfo = ctx.namedValues[name] ?: error("Variable '$name' not declared")
+            val varInfo = ctx.lookup(name) ?: error("Variable '${expr.ID().text}' not declared")
             val value = compileExpr(expr.expr(0))
             LLVMBuildStore(ctx.builder, value, varInfo.ptr)
             return value // return assigned value
@@ -122,7 +122,7 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
                 LLVMConstInt(LLVMInt32TypeInContext(ctx.context), expr.NUMBER().text.toLong(), 0)
 
             expr.ID() != null -> {
-                val varInfo = ctx.namedValues[expr.ID().text] ?: error("Variable '${expr.ID().text}' not declared")
+                val varInfo = ctx.lookup(expr.ID().text) ?: error("Variable '${expr.ID().text}' not declared")
                 LLVMBuildLoad2(
                     ctx.builder,
                     varInfo.type,

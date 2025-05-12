@@ -24,6 +24,7 @@
         | whileStmt
         | returnStmt
         | exprStmt
+        | block
         ;
 
     exprStmt: expr ';';     // ✅ i tu nową regułę

@@ -16,6 +16,8 @@ class FunctionBodyCompiler(private val ctx: CompilerContext) {
 
             val entry = LLVMAppendBasicBlockInContext(ctx.context, function, "entry")
             LLVMPositionBuilderAtEnd(ctx.builder, entry)
+            ctx.enterScope()
+
 
             funcDecl.parameters()?.parameter()?.forEachIndexed { i, param ->
                 val paramName = param.ID().text
@@ -23,7 +25,7 @@ class FunctionBodyCompiler(private val ctx: CompilerContext) {
                 val llvmParam = LLVMGetParam(function, i)
                 val alloca = LLVMUtils.createEntryBlockAlloca(ctx.builder, function, paramName, paramType)
                 LLVMBuildStore(ctx.builder, llvmParam, alloca)
-                ctx.namedValues[paramName] = VariableInfo(alloca, paramType)
+                ctx.declare(paramName, VariableInfo(alloca, paramType))
             }
 
             val stmtCompiler = StatementCompiler(ctx, ExpressionCompiler(ctx))
@@ -40,6 +42,7 @@ class FunctionBodyCompiler(private val ctx: CompilerContext) {
             }
 
             println("✅ Function '$name' compiled")
+            ctx.exitScope()
         }
     }
 }

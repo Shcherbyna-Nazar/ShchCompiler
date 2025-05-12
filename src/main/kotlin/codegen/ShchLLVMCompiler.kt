@@ -3,6 +3,7 @@ package shch.codegen
 import codegen.FunctionBodyCompiler
 import codegen.FunctionDeclarationPass
 import codegen.data.VariableInfo
+import codegen.utils.LLVMUtils
 import context.CompilerContext
 import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.PointerPointer
@@ -30,32 +31,67 @@ class ShchLLVMCompiler {
 
         val compilerCtx = CompilerContext(
             context, builder, module,
-            namedValues,
             mainFunc,
             mutableMapOf()
         )
 
         try {
+            compilerCtx.enterScope()
+
+            // 🌍 GLOBAL VARIABLE DECLARATIONS
+            val globalVarDecls = tree.statement().mapNotNull { it.varDecl() }
+            for (decl in globalVarDecls) {
+                val name = decl.ID().text
+                val type = LLVMUtils.getLLVMType(context, decl.type().text)
+
+                val initialValue = decl.expr()?.let {
+                    val const = codegen.ExpressionCompiler(compilerCtx).compileExpr(it)
+                    if (LLVMIsConstant(const) == 0) {
+                        error("Global variable '$name' must be initialized with a constant value")
+                    }
+                    const
+                } ?: when (LLVMGetTypeKind(type)) {
+                    LLVMIntegerTypeKind -> LLVMConstInt(type, 0, 0)
+                    LLVMDoubleTypeKind -> LLVMConstReal(type, 0.0)
+                    LLVMPointerTypeKind -> LLVMConstNull(type)
+                    else -> error("Unsupported type for global variable '$name'")
+                }
+
+                val global = LLVMAddGlobal(module, type, name)
+                LLVMSetInitializer(global, initialValue)
+                compilerCtx.declare(name, VariableInfo(global, type))
+                println("🌍 Global variable '$name' declared and initialized")
+            }
+
+            // 1️⃣ Funkcje - deklaracje
             val declPass = FunctionDeclarationPass(compilerCtx)
             val functionDecls = tree.children.filterIsInstance<ShchParser.FunctionDeclContext>()
             declPass.declareAll(functionDecls)
 
+            // 2️⃣ Funkcje - ciała
             val bodyCompiler = FunctionBodyCompiler(compilerCtx)
             bodyCompiler.compileAll(functionDecls)
 
+            // 3️⃣ main body
             val stmtCompiler = codegen.StatementCompiler(compilerCtx, codegen.ExpressionCompiler(compilerCtx))
             LLVMPositionBuilderAtEnd(builder, mainEntry)
             for (stmt in tree.statement()) {
+                // ❌ pomijamy globalne varDecl (już skompilowane)
+                if (stmt.varDecl() != null) continue
+
                 val currentBB = LLVMGetInsertBlock(builder)
                 if (LLVMGetBasicBlockTerminator(currentBB) != null) break
                 stmtCompiler.compileStatement(stmt)
             }
 
+            // 4️⃣ Domknięcie main
             val currentBB = LLVMGetInsertBlock(builder)
             if (LLVMGetBasicBlockTerminator(currentBB) == null) {
                 LLVMBuildRet(builder, LLVMConstInt(LLVMInt32TypeInContext(context), 0, 0))
                 println("🔚 Appended implicit `return 0` to main")
             }
+
+            compilerCtx.exitScope()
 
         } catch (e: Exception) {
             println("❌ Compilation error: ${e.message}")
@@ -64,6 +100,7 @@ class ShchLLVMCompiler {
             LLVMDeleteFunction(mainFunc)
         }
     }
+
 
     fun saveToFile(path: String) {
         if (compilationFailed) {

@@ -13,6 +13,7 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
 
     fun compileStatement(stmt: ShchParser.StatementContext) {
         when {
+            stmt.block() != null -> compileBlock(stmt.block())
             stmt.exprStmt() != null -> compileExprStmt(stmt.exprStmt())
             stmt.varDecl() != null -> compileVarDecl(stmt.varDecl())
             stmt.assignStmt() != null -> compileAssign(stmt.assignStmt())
@@ -49,17 +50,18 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
 
 
     fun compileBlock(block: ShchParser.BlockContext): Boolean {
+        ctx.enterScope()
         for (stmt in block.statement()) {
             compileStatement(stmt)
-
             val currentBB = LLVMGetInsertBlock(ctx.builder)
             val terminator = LLVMGetBasicBlockTerminator(currentBB)
             if (terminator != null && !terminator.isNull) {
-                println("🛑 Found terminator after: ${stmt.text}")
+                println("🛑 Block terminated early after: ${stmt.text}")
+                ctx.exitScope()
                 return true
             }
         }
-
+        ctx.exitScope()
         val finalTerm = LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(ctx.builder))
         return finalTerm != null && !finalTerm.isNull
     }
@@ -183,7 +185,7 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
 
     private fun compileRead(readStmt: ShchParser.ReadStmtContext) {
         val name = readStmt.ID().text
-        val varInfo = ctx.namedValues[name] ?: error("Variable '$name' not declared")
+        val varInfo = ctx.lookup(name) ?: error("Variable '$name' not declared")
 
         val typeKind = LLVMGetTypeKind(varInfo.type)
         val formatStr = when (typeKind) {
@@ -238,7 +240,7 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
 
         val currentFunction = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder))
         val alloca = LLVMUtils.createEntryBlockAlloca(ctx.builder, currentFunction, name, llvmType)
-        ctx.namedValues[name] = VariableInfo(alloca, llvmType)
+        ctx.declare(name, VariableInfo(alloca, llvmType))
 
         decl.expr()?.let {
             val value = exprCompiler.compileExpr(it)
@@ -248,7 +250,7 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
 
     private fun compileAssign(assign: ShchParser.AssignStmtContext) {
         val name = assign.ID().text
-        val varInfo = ctx.namedValues[name] ?: error("Variable '$name' not declared")
+        val varInfo = ctx.lookup(name) ?: error("Variable '$name' not declared")
         val value = exprCompiler.compileExpr(assign.expr())
         LLVMBuildStore(ctx.builder, value, varInfo.ptr)
     }
