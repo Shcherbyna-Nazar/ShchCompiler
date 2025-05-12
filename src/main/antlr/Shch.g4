@@ -1,6 +1,10 @@
     grammar Shch;
 
-    program: statement* EOF;
+   program: (functionDecl | statement)* EOF;
+
+   functionDecl: 'fun' ID '(' parameters? ')' ':' type block;
+   parameters: parameter (',' parameter)*;
+   parameter: ID ':' type;
 
     COMMENT
       : '//' ~[\r\n]* -> skip
@@ -18,7 +22,13 @@
         | printlnStmt
         | ifStmt
         | whileStmt
+        | returnStmt
+        | exprStmt
         ;
+
+    exprStmt: expr ';';     // ✅ i tu nową regułę
+
+    returnStmt: 'return' expr? ';';
 
     printStmt: 'print' '(' expr ')' ';';
     printlnStmt: 'println' '(' expr ')' ';';
@@ -33,10 +43,11 @@
 
     block: '{' statement* '}';
 
-   type: 'Int' | 'Float' | 'String' | 'Boolean';
+    type: 'Int' | 'Float' | 'String' | 'Boolean' | 'Void';
 
 expr
-    : ID assign='=' expr
+    : ID '(' (expr (',' expr)*)? ')'    // <-- funkcja z argumentami (0+)
+    | ID assign='=' expr
     | not='!' expr
     | sign='-' expr
     | expr op='&' expr

@@ -15,6 +15,41 @@ import org.bytedeco.llvm.global.LLVM.*
 class ExpressionCompiler(private val ctx: CompilerContext) {
 
     fun compileExpr(expr: ShchParser.ExprContext): LLVMValueRef {
+        println("📦 Expression: ${expr.text}")
+
+        if (expr.ID() != null && expr.assign == null && expr.getChildCount() >= 3 && expr.getChild(1).text == "(") {
+            val funcName = expr.ID().text
+            val signature = ctx.declaredFunctions[funcName]
+                ?: error("Function '$funcName' not declared")
+
+            val args = expr.expr().map { compileExpr(it) }
+            if (args.size != signature.paramTypes.size) {
+                error("Function '$funcName' expects ${signature.paramTypes.size} arguments, got ${args.size}")
+            }
+
+            val argArray = PointerPointer(*args.toTypedArray())
+
+            val funcType = LLVMFunctionType(
+                signature.returnType,
+                PointerPointer(*signature.paramTypes.toTypedArray()),
+                signature.paramTypes.size,
+                0
+            )
+
+            val result = LLVMBuildCall2(
+                ctx.builder,
+                funcType,
+                signature.function,
+                argArray,
+                args.size,
+                if (LLVMGetTypeKind(signature.returnType) == LLVMVoidTypeKind) "" else "call_$funcName"
+            )
+
+            println("📞 Called function '$funcName' with ${args.size} argument(s)")
+            return result
+        }
+
+
         if (expr.assign != null) {
             val name = expr.ID().text
             val varInfo = ctx.namedValues[name] ?: error("Variable '$name' not declared")

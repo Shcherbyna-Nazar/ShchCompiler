@@ -1,7 +1,7 @@
 package shch.codegen
 
-import codegen.ExpressionCompiler
-import codegen.StatementCompiler
+import codegen.FunctionBodyCompiler
+import codegen.FunctionDeclarationPass
 import codegen.data.VariableInfo
 import context.CompilerContext
 import org.bytedeco.javacpp.BytePointer
@@ -21,29 +21,45 @@ class ShchLLVMCompiler {
     private val namedValues = mutableMapOf<String, VariableInfo>()
 
     fun compile(tree: ShchParser.ProgramContext) {
+        println("🌳 Parsed statements: ${tree.statement().size}")
+
         val mainType = LLVMFunctionType(LLVMInt32TypeInContext(context), null as PointerPointer<LLVMTypeRef>?, 0, 0)
         mainFunc = LLVMAddFunction(module, "main", mainType)
+        val mainEntry = LLVMAppendBasicBlockInContext(context, mainFunc, "entry")
+        LLVMPositionBuilderAtEnd(builder, mainEntry)
 
-        val entry = LLVMAppendBasicBlockInContext(context, mainFunc, "entry")
-        LLVMPositionBuilderAtEnd(builder, entry)
-        val compilerCtx = CompilerContext(context, builder, module, namedValues, mainFunc)
-        val exprCompiler = ExpressionCompiler(compilerCtx)
-        val stmtCompiler = StatementCompiler(compilerCtx, exprCompiler)
+        val compilerCtx = CompilerContext(
+            context, builder, module,
+            namedValues,
+            mainFunc,
+            mutableMapOf()
+        )
 
         try {
+            val declPass = FunctionDeclarationPass(compilerCtx)
+            val functionDecls = tree.children.filterIsInstance<ShchParser.FunctionDeclContext>()
+            declPass.declareAll(functionDecls)
+
+            val bodyCompiler = FunctionBodyCompiler(compilerCtx)
+            bodyCompiler.compileAll(functionDecls)
+
+            val stmtCompiler = codegen.StatementCompiler(compilerCtx, codegen.ExpressionCompiler(compilerCtx))
+            LLVMPositionBuilderAtEnd(builder, mainEntry)
             for (stmt in tree.statement()) {
                 val currentBB = LLVMGetInsertBlock(builder)
-                val terminator = LLVMGetBasicBlockTerminator(currentBB)
-                if (terminator != null && !terminator.isNull) break
+                if (LLVMGetBasicBlockTerminator(currentBB) != null) break
                 stmtCompiler.compileStatement(stmt)
             }
 
-            val terminator = LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(builder))
-            if (terminator == null || terminator.isNull) {
+            val currentBB = LLVMGetInsertBlock(builder)
+            if (LLVMGetBasicBlockTerminator(currentBB) == null) {
                 LLVMBuildRet(builder, LLVMConstInt(LLVMInt32TypeInContext(context), 0, 0))
+                println("🔚 Appended implicit `return 0` to main")
             }
+
         } catch (e: Exception) {
-            println("Compilation error: ${e.message}")
+            println("❌ Compilation error: ${e.message}")
+            e.printStackTrace()
             compilationFailed = true
             LLVMDeleteFunction(mainFunc)
         }
