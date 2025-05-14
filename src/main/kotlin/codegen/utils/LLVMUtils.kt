@@ -8,7 +8,8 @@ import org.bytedeco.llvm.global.LLVM.*
 object LLVMUtils {
     fun getLLVMType(ctx: CompilerContext, type: String): LLVMTypeRef = when (type) {
         "Int" -> LLVMInt32TypeInContext(ctx.context)
-        "Float" -> LLVMDoubleTypeInContext(ctx.context)
+        "Float32" -> LLVMFloatTypeInContext(ctx.context)     // ← nowy typ
+        "Float64", "Float" -> LLVMDoubleTypeInContext(ctx.context)
         "String" -> LLVMPointerType(LLVMInt8TypeInContext(ctx.context), 0)
         "Boolean" -> LLVMInt1TypeInContext(ctx.context)
         "Void" -> LLVMVoidTypeInContext(ctx.context)  // ✅ ← this line
@@ -18,16 +19,29 @@ object LLVMUtils {
     fun isFloat(a: LLVMValueRef, b: LLVMValueRef): Boolean {
         val t1 = LLVMTypeOf(a)
         val t2 = LLVMTypeOf(b)
-        return LLVMGetTypeKind(t1) == LLVMDoubleTypeKind || LLVMGetTypeKind(t2) == LLVMDoubleTypeKind
+        return LLVMGetTypeKind(t1) in setOf(LLVMFloatTypeKind, LLVMDoubleTypeKind) ||
+                LLVMGetTypeKind(t2) in setOf(LLVMFloatTypeKind, LLVMDoubleTypeKind)
     }
 
-    fun promoteToFloat(builder: LLVMBuilderRef, value: LLVMValueRef, context: LLVMContextRef): LLVMValueRef {
-        val type = LLVMTypeOf(value)
-        return if (LLVMGetTypeKind(type) == LLVMIntegerTypeKind)
-            LLVMBuildSIToFP(builder, value, LLVMDoubleTypeInContext(context), "intToFloat")
-        else
-            value
+
+    fun promoteToFloat(targetType: LLVMTypeRef, value: LLVMValueRef, builder: LLVMBuilderRef): LLVMValueRef {
+        val valType = LLVMTypeOf(value)
+        return when {
+            LLVMGetTypeKind(valType) == LLVMIntegerTypeKind ->
+                LLVMBuildSIToFP(builder, value, targetType, "intToFloat")
+
+            LLVMGetTypeKind(valType) == LLVMFloatTypeKind &&
+                    LLVMGetTypeKind(targetType) == LLVMDoubleTypeKind ->
+                LLVMBuildFPExt(builder, value, targetType, "fpext")
+
+            LLVMGetTypeKind(valType) == LLVMDoubleTypeKind &&
+                    LLVMGetTypeKind(targetType) == LLVMFloatTypeKind ->
+                LLVMBuildFPTrunc(builder, value, targetType, "fptrunc")
+
+            else -> value
+        }
     }
+
 
     fun buildGlobalStringPtr(context: LLVMContextRef, module: LLVMModuleRef, builder: LLVMBuilderRef, str: String, name: String): LLVMValueRef {
         val strConst = LLVMConstStringInContext(context, str, str.length, 0)

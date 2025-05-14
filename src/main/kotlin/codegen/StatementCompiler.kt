@@ -124,12 +124,17 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
             typeKind = LLVMIntegerTypeKind // теперь это точно целое число i32
         }
 
+        if (typeKind == LLVMFloatTypeKind) {
+            value = LLVMBuildFPExt(ctx.builder, value, LLVMDoubleTypeInContext(ctx.context), "fpext_to_double")
+        }
+
         // For 'print', we deliberately *do not* add the newline in the format string
         val formatStr = when (typeKind) {
-            LLVMDoubleTypeKind -> "%f"       // no \n
-            LLVMIntegerTypeKind -> "%d"       // no \n
-            LLVMPointerTypeKind -> "%s"       // no \n (for strings)
-            else -> error("Unsupported type in print")
+            LLVMFloatTypeKind -> "%f"
+            LLVMDoubleTypeKind -> "%lf"
+            LLVMIntegerTypeKind -> "%d"
+            LLVMPointerTypeKind -> "%s"
+            else -> error("Unsupported type in println")
         }
 
         val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
@@ -160,9 +165,13 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
 
         println("🖨️ println value type: ${LLVMPrintTypeToString(LLVMTypeOf(value)).string}")
 
+        if (typeKind == LLVMFloatTypeKind) {
+            value = LLVMBuildFPExt(ctx.builder, value, LLVMDoubleTypeInContext(ctx.context), "fpext_to_double")
+        }
 
         val formatStr = when (typeKind) {
-            LLVMDoubleTypeKind -> "%f\n"
+            LLVMFloatTypeKind -> "%f\n"
+            LLVMDoubleTypeKind -> "%lf\n"
             LLVMIntegerTypeKind -> "%d\n"
             LLVMPointerTypeKind -> "%s\n"
             else -> error("Unsupported type in println")

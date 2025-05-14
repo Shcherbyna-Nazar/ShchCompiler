@@ -155,12 +155,14 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
                 result
             }
 
-
-            expr.NUMBER() != null && expr.NUMBER().text.contains(".") ->
-                LLVMConstReal(LLVMDoubleTypeInContext(ctx.context), expr.NUMBER().text.toDouble())
-
-            expr.NUMBER() != null ->
-                LLVMConstInt(LLVMInt32TypeInContext(ctx.context), expr.NUMBER().text.toLong(), 0)
+            expr.NUMBER() != null  -> {
+                val text = expr.NUMBER().text
+                return when {
+                    text.endsWith("f", true) -> LLVMConstReal(LLVMFloatTypeInContext(ctx.context), text.dropLast(1).toFloat().toDouble())
+                    text.contains('.') -> LLVMConstReal(LLVMDoubleTypeInContext(ctx.context), text.toDouble())
+                    else -> LLVMConstInt(LLVMInt32TypeInContext(ctx.context), text.toLong(), 0)
+                }
+            }
 
             expr.ID() != null -> {
                 val varInfo = ctx.lookup(expr.ID().text) ?: error("Variable '${expr.ID().text}' not declared")
@@ -185,20 +187,24 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
                 val left = compileExpr(expr.expr(0))
                 val right = compileExpr(expr.expr(1))
 
-                if (isFloat(left, right)) {
-                    var l = promoteToFloat(ctx.builder, left, ctx.context)
-                    var r = promoteToFloat(ctx.builder, right, ctx.context)
+                val lType = LLVMTypeOf(left)
+                val rType = LLVMTypeOf(right)
 
-                    if (LLVMGetTypeKind(LLVMTypeOf(l)) == LLVMIntegerTypeKind &&
-                        LLVMGetIntTypeWidth(LLVMTypeOf(l)) == 1
-                    ) {
-                        l = LLVMBuildUIToFP(ctx.builder, l, LLVMDoubleTypeInContext(ctx.context), "booltofloat_l")
-                    }
-                    if (LLVMGetTypeKind(LLVMTypeOf(r)) == LLVMIntegerTypeKind &&
-                        LLVMGetIntTypeWidth(LLVMTypeOf(r)) == 1
-                    ) {
-                        r = LLVMBuildUIToFP(ctx.builder, r, LLVMDoubleTypeInContext(ctx.context), "booltofloat_r")
-                    }
+                val lKind = LLVMGetTypeKind(lType)
+                val rKind = LLVMGetTypeKind(rType)
+
+                val isFloatOp = lKind in setOf(LLVMFloatTypeKind, LLVMDoubleTypeKind) ||
+                        rKind in setOf(LLVMFloatTypeKind, LLVMDoubleTypeKind)
+
+                if (isFloatOp) {
+                    // Determine common float type
+                    val targetType = if (lKind == LLVMDoubleTypeKind || rKind == LLVMDoubleTypeKind)
+                        LLVMDoubleTypeInContext(ctx.context)
+                    else
+                        LLVMFloatTypeInContext(ctx.context)
+
+                    val l = promoteToFloat(targetType, left, ctx.builder)
+                    val r = promoteToFloat(targetType, right, ctx.builder)
 
                     return when (expr.op.text) {
                         "+" -> LLVMBuildFAdd(ctx.builder, l, r, "faddtmp")
@@ -211,68 +217,28 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
                         "<=" -> LLVMBuildFCmp(ctx.builder, LLVMRealOLE, l, r, "cmptmp")
                         ">" -> LLVMBuildFCmp(ctx.builder, LLVMRealOGT, l, r, "cmptmp")
                         ">=" -> LLVMBuildFCmp(ctx.builder, LLVMRealOGE, l, r, "cmptmp")
-                        else -> error("Unknown float operator: ${expr.op.text}")
+                        else -> error("Unsupported float operator: ${expr.op.text}")
                     }
                 } else {
+                    // Possibly bool to int promotion
+                    val l = if (lKind == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(lType) == 1)
+                        boolToInt(left, ctx.builder, ctx.context) else left
+                    val r = if (rKind == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(rType) == 1)
+                        boolToInt(right, ctx.builder, ctx.context) else right
+
                     return when (expr.op.text) {
-                        "+" -> LLVMBuildAdd(ctx.builder, left, right, "addtmp")
-                        "-" -> LLVMBuildSub(ctx.builder, left, right, "subtmp")
-                        "*" -> LLVMBuildMul(ctx.builder, left, right, "multmp")
-                        "/" -> {
-                            var l = left
-                            var r = right
-
-                            if (LLVMGetTypeKind(LLVMTypeOf(l)) == LLVMIntegerTypeKind &&
-                                LLVMGetIntTypeWidth(LLVMTypeOf(l)) == 1
-                            ) {
-                                l = boolToInt(l, ctx.builder, ctx.context)
-                            }
-                            if (LLVMGetTypeKind(LLVMTypeOf(r)) == LLVMIntegerTypeKind &&
-                                LLVMGetIntTypeWidth(LLVMTypeOf(r)) == 1
-                            ) {
-                                r = boolToInt(r, ctx.builder, ctx.context)
-                            }
-
-                            if (LLVMGetTypeKind(LLVMTypeOf(l)) != LLVMIntegerTypeKind ||
-                                LLVMGetTypeKind(LLVMTypeOf(r)) != LLVMIntegerTypeKind
-                            ) {
-                                error("Operands to '/' must be both Int")
-                            }
-
-                            LLVMBuildSDiv(ctx.builder, l, r, "divtmp")
-                        }
-
-                        "%" -> {
-                            var l = left
-                            var r = right
-
-                            if (LLVMGetTypeKind(LLVMTypeOf(l)) == LLVMIntegerTypeKind &&
-                                LLVMGetIntTypeWidth(LLVMTypeOf(l)) == 1
-                            ) {
-                                l = boolToInt(l, ctx.builder, ctx.context)
-                            }
-                            if (LLVMGetTypeKind(LLVMTypeOf(r)) == LLVMIntegerTypeKind &&
-                                LLVMGetIntTypeWidth(LLVMTypeOf(r)) == 1
-                            ) {
-                                r = boolToInt(r, ctx.builder, ctx.context)
-                            }
-
-                            if (LLVMGetTypeKind(LLVMTypeOf(l)) != LLVMIntegerTypeKind ||
-                                LLVMGetTypeKind(LLVMTypeOf(r)) != LLVMIntegerTypeKind
-                            ) {
-                                error("Operands to '%' must be both Int")
-                            }
-
-                            LLVMBuildSRem(ctx.builder, l, r, "modtmp")
-                        }
-
-                        "==" -> LLVMBuildICmp(ctx.builder, LLVMIntEQ, left, right, "cmptmp")
-                        "!=" -> LLVMBuildICmp(ctx.builder, LLVMIntNE, left, right, "cmptmp")
-                        "<" -> LLVMBuildICmp(ctx.builder, LLVMIntSLT, left, right, "cmptmp")
-                        "<=" -> LLVMBuildICmp(ctx.builder, LLVMIntSLE, left, right, "cmptmp")
-                        ">" -> LLVMBuildICmp(ctx.builder, LLVMIntSGT, left, right, "cmptmp")
-                        ">=" -> LLVMBuildICmp(ctx.builder, LLVMIntSGE, left, right, "cmptmp")
-                        else -> error("Unknown integer operator: ${expr.op.text}")
+                        "+" -> LLVMBuildAdd(ctx.builder, l, r, "addtmp")
+                        "-" -> LLVMBuildSub(ctx.builder, l, r, "subtmp")
+                        "*" -> LLVMBuildMul(ctx.builder, l, r, "multmp")
+                        "/" -> LLVMBuildSDiv(ctx.builder, l, r, "divtmp")
+                        "%" -> LLVMBuildSRem(ctx.builder, l, r, "modtmp")
+                        "==" -> LLVMBuildICmp(ctx.builder, LLVMIntEQ, l, r, "cmptmp")
+                        "!=" -> LLVMBuildICmp(ctx.builder, LLVMIntNE, l, r, "cmptmp")
+                        "<" -> LLVMBuildICmp(ctx.builder, LLVMIntSLT, l, r, "cmptmp")
+                        "<=" -> LLVMBuildICmp(ctx.builder, LLVMIntSLE, l, r, "cmptmp")
+                        ">" -> LLVMBuildICmp(ctx.builder, LLVMIntSGT, l, r, "cmptmp")
+                        ">=" -> LLVMBuildICmp(ctx.builder, LLVMIntSGE, l, r, "cmptmp")
+                        else -> error("Unsupported integer operator: ${expr.op.text}")
                     }
                 }
             }
@@ -313,13 +279,14 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
                 "boolify"
             )
 
-            LLVMGetTypeKind(type) == LLVMDoubleTypeKind -> LLVMBuildFCmp(
-                ctx.builder,
-                LLVMRealUNE,
-                value,
-                LLVMConstReal(type, 0.0),
-                "boolify"
-            )
+            LLVMGetTypeKind(type) == LLVMFloatTypeKind || LLVMGetTypeKind(type) == LLVMDoubleTypeKind  -> {
+                val zero = if (LLVMGetTypeKind(type) == LLVMFloatTypeKind)
+                    LLVMConstReal(LLVMFloatTypeInContext(ctx.context), 0.0f.toDouble())
+                else
+                    LLVMConstReal(LLVMDoubleTypeInContext(ctx.context), 0.0)
+
+                LLVMBuildFCmp(ctx.builder, LLVMRealUNE, value, zero, "boolify")
+            }
 
             else -> error("Unsupported type for condition")
         }
