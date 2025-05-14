@@ -1,5 +1,6 @@
 package context
 import codegen.data.FunctionSignature
+import codegen.data.StructInfo
 import codegen.data.VariableInfo
 import org.bytedeco.llvm.LLVM.*
 
@@ -7,8 +8,8 @@ class CompilerContext(
     val context: LLVMContextRef,
     val builder: LLVMBuilderRef,
     val module: LLVMModuleRef,
-    val currentFunction: LLVMValueRef,
-    val declaredFunctions: MutableMap<String, FunctionSignature>
+    val declaredFunctions: MutableMap<String, FunctionSignature>,
+    val declaredStructs: MutableMap<String, StructInfo> = mutableMapOf()
 ) {
     private val namedValueScopes: ArrayDeque<MutableMap<String, VariableInfo>> = ArrayDeque(listOf(mutableMapOf()))
 

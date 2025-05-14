@@ -158,6 +158,8 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
             typeKind = LLVMIntegerTypeKind // теперь это точно целое число i32
         }
 
+        println("🖨️ println value type: ${LLVMPrintTypeToString(LLVMTypeOf(value)).string}")
+
 
         val formatStr = when (typeKind) {
             LLVMDoubleTypeKind -> "%f\n"
@@ -236,7 +238,7 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
 
     private fun compileVarDecl(decl: ShchParser.VarDeclContext) {
         val name = decl.ID().text
-        val llvmType = LLVMUtils.getLLVMType(ctx.context, decl.type().text)
+        val llvmType = LLVMUtils.getLLVMType(ctx, decl.type().text)
 
         val currentFunction = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder))
         val alloca = LLVMUtils.createEntryBlockAlloca(ctx.builder, currentFunction, name, llvmType)

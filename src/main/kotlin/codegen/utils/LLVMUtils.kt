@@ -1,17 +1,18 @@
 package codegen.utils
 
+import context.CompilerContext
 import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.llvm.LLVM.*
 import org.bytedeco.llvm.global.LLVM.*
 
 object LLVMUtils {
-    fun getLLVMType(context: LLVMContextRef, type: String): LLVMTypeRef = when (type) {
-        "Int" -> LLVMInt32TypeInContext(context)
-        "Float" -> LLVMDoubleTypeInContext(context)
-        "String" -> LLVMPointerType(LLVMInt8TypeInContext(context), 0)
-        "Boolean" -> LLVMInt1TypeInContext(context)
-        "Void" -> LLVMVoidTypeInContext(context)  // ✅ ← this line
-        else -> error("Unsupported type: $type")
+    fun getLLVMType(ctx: CompilerContext, type: String): LLVMTypeRef = when (type) {
+        "Int" -> LLVMInt32TypeInContext(ctx.context)
+        "Float" -> LLVMDoubleTypeInContext(ctx.context)
+        "String" -> LLVMPointerType(LLVMInt8TypeInContext(ctx.context), 0)
+        "Boolean" -> LLVMInt1TypeInContext(ctx.context)
+        "Void" -> LLVMVoidTypeInContext(ctx.context)  // ✅ ← this line
+        else -> ctx.declaredStructs[type]?.type ?: error("Unsupported or unknown type: $type")
     }
 
     fun isFloat(a: LLVMValueRef, b: LLVMValueRef): Boolean {

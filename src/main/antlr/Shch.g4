@@ -1,6 +1,9 @@
     grammar Shch;
 
-   program: (functionDecl | statement)* EOF;
+   program: (structDecl | functionDecl | statement)* EOF;
+
+   structDecl: 'struct' ID '{' structField* '}';
+   structField: ID ':' type ';';
 
    functionDecl: 'fun' ID '(' parameters? ')' ':' type block;
    parameters: parameter (',' parameter)*;
@@ -44,10 +47,12 @@
 
     block: '{' statement* '}';
 
-    type: 'Int' | 'Float' | 'String' | 'Boolean' | 'Void';
+    type: ID;
 
 expr
-    : ID '(' (expr (',' expr)*)? ')'    // <-- funkcja z argumentami (0+)
+    : expr '.' ID
+    | ID '(' (expr (',' expr)*)? ')'    // function or constructor call
+    | ID '(' (expr (',' expr)*)? ')'    // <-- funkcja z argumentami (0+)
     | ID assign='=' expr
     | not='!' expr
     | sign='-' expr

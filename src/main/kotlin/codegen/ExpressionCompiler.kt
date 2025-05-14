@@ -17,6 +17,47 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
     fun compileExpr(expr: ShchParser.ExprContext): LLVMValueRef {
         println("📦 Expression: ${expr.text}")
 
+        if (expr.expr()?.size == 1 && expr.ID() != null && expr.getChildCount() == 3 && expr.getChild(1).text == ".") {
+            val baseExpr = expr.expr(0)
+            val baseValue = compileExpr(baseExpr)  // This LOADS the struct
+            val baseType = LLVMTypeOf(baseValue)
+
+            // You must handle the struct VALUE type here (not a pointer!)
+            val structInfo = ctx.declaredStructs.values.find { it.type == baseType }
+                ?: error("Unknown struct for field access: ${baseType.address()}")
+
+            val fieldName = expr.ID().text
+            val fieldIndex = structInfo.fields[fieldName]
+                ?: error("Field '$fieldName' not found in struct '${structInfo.name}'")
+
+            // To access a field from a value, store it in a temporary alloca first
+            val tmpPtr = LLVMBuildAlloca(ctx.builder, structInfo.type, "tmp_struct")
+            LLVMBuildStore(ctx.builder, baseValue, tmpPtr)
+
+            val gep = LLVMBuildStructGEP2(ctx.builder, structInfo.type, tmpPtr, fieldIndex, "get_$fieldName")
+            return LLVMBuildLoad2(ctx.builder, structInfo.fieldTypes[fieldIndex], gep, "load_$fieldName")
+        }
+
+        if (expr.ID() != null && expr.expr().isNotEmpty()) {
+            val structInfo = ctx.declaredStructs[expr.ID().text]
+            if (structInfo != null) {
+                val args = expr.expr().map { compileExpr(it) }
+                if (args.size != structInfo.fieldTypes.size) {
+                    error("Struct '${structInfo.name}' expects ${structInfo.fieldTypes.size} fields, got ${args.size}")
+                }
+
+                val ptr = LLVMBuildAlloca(ctx.builder, structInfo.type, "tmp_${structInfo.name}")
+                for ((i, arg) in args.withIndex()) {
+                    val fieldPtr = LLVMBuildStructGEP2(ctx.builder, structInfo.type, ptr, i, "fld$i")
+                    LLVMBuildStore(ctx.builder, arg, fieldPtr)
+                }
+
+                // ❗ Return the VALUE, not the pointer
+                return LLVMBuildLoad2(ctx.builder, structInfo.type, ptr, "load_struct")
+            }
+        }
+
+
         if (expr.ID() != null && expr.assign == null && expr.getChildCount() >= 3 && expr.getChild(1).text == "(") {
             val funcName = expr.ID().text
             val signature = ctx.declaredFunctions[funcName]

@@ -2,6 +2,7 @@ package shch.codegen
 
 import codegen.FunctionBodyCompiler
 import codegen.FunctionDeclarationPass
+import codegen.StructDeclarationPass
 import codegen.data.VariableInfo
 import codegen.utils.LLVMUtils
 import context.CompilerContext
@@ -31,7 +32,6 @@ class ShchLLVMCompiler {
 
         val compilerCtx = CompilerContext(
             context, builder, module,
-            mainFunc,
             mutableMapOf()
         )
 
@@ -42,7 +42,7 @@ class ShchLLVMCompiler {
             val globalVarDecls = tree.statement().mapNotNull { it.varDecl() }
             for (decl in globalVarDecls) {
                 val name = decl.ID().text
-                val type = LLVMUtils.getLLVMType(context, decl.type().text)
+                val type = LLVMUtils.getLLVMType(compilerCtx, decl.type().text)
 
                 val initialValue = decl.expr()?.let {
                     val const = codegen.ExpressionCompiler(compilerCtx).compileExpr(it)
@@ -62,6 +62,10 @@ class ShchLLVMCompiler {
                 compilerCtx.declare(name, VariableInfo(global, type))
                 println("🌍 Global variable '$name' declared and initialized")
             }
+
+            val structDeclPass = StructDeclarationPass(compilerCtx)
+            val structDecls = tree.children.filterIsInstance<ShchParser.StructDeclContext>()
+            structDeclPass.declareAll(structDecls)
 
             // 1️⃣ Funkcje - deklaracje
             val declPass = FunctionDeclarationPass(compilerCtx)

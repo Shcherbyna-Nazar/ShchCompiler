@@ -12,9 +12,9 @@ class FunctionDeclarationPass(private val ctx: CompilerContext) {
     fun declareAll(functionDecls: List<ShchParser.FunctionDeclContext>) {
         for (funcDecl in functionDecls) {
             val name = funcDecl.ID().text
-            val returnType = LLVMUtils.getLLVMType(ctx.context, funcDecl.type().text)
+            val returnType = LLVMUtils.getLLVMType(ctx, funcDecl.type().text)
             val paramTypes = funcDecl.parameters()?.parameter()?.map {
-                LLVMUtils.getLLVMType(ctx.context, it.type().text)
+                LLVMUtils.getLLVMType(ctx, it.type().text)
             } ?: emptyList()
 
             val funcType = LLVMFunctionType(returnType, PointerPointer(*paramTypes.toTypedArray()), paramTypes.size, 0)
