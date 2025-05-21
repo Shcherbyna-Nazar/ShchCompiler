@@ -4,8 +4,8 @@ import codegen.data.FunctionSignature
 import codegen.utils.LLVMUtils
 import context.CompilerContext
 import org.bytedeco.javacpp.PointerPointer
-import org.bytedeco.llvm.global.LLVM.LLVMFunctionType
 import org.bytedeco.llvm.global.LLVM.LLVMAddFunction
+import org.bytedeco.llvm.global.LLVM.LLVMFunctionType
 import shch.ShchParser
 
 class FunctionDeclarationPass(private val ctx: CompilerContext) {

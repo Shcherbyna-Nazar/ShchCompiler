@@ -1,16 +1,16 @@
 package codegen
 
-import org.bytedeco.llvm.LLVM.*
-import shch.ShchParser
 import codegen.data.ValueWithBlock
+import codegen.utils.LLVMUtils
 import codegen.utils.LLVMUtils.boolToInt
 import codegen.utils.LLVMUtils.buildGlobalStringPtr
-import codegen.utils.LLVMUtils.isFloat
 import codegen.utils.LLVMUtils.promoteToFloat
 import context.CompilerContext
 import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.PointerPointer
+import org.bytedeco.llvm.LLVM.*
 import org.bytedeco.llvm.global.LLVM.*
+import shch.ShchParser
 
 class ExpressionCompiler(private val ctx: CompilerContext) {
 
@@ -94,10 +94,30 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
         if (expr.assign != null) {
             val name = expr.ID().text
             val varInfo = ctx.lookup(name) ?: error("Variable '${expr.ID().text}' not declared")
+
             val value = compileExpr(expr.expr(0))
-            LLVMBuildStore(ctx.builder, value, varInfo.ptr)
-            return value // return assigned value
+            val finalValue = if (LLVMUtils.isAnyType(ctx, varInfo.type)) {
+                // 🔁 Box value
+                val valType = LLVMTypeOf(value)
+                when {
+                    LLVMGetTypeKind(valType) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(valType) == 1 ->
+                        LLVMUtils.boxBool(ctx, value)
+
+                    LLVMGetTypeKind(valType) == LLVMIntegerTypeKind ->
+                        LLVMUtils.boxInt(ctx, value)
+
+                    LLVMGetTypeKind(valType) == LLVMDoubleTypeKind ->
+                        LLVMUtils.boxFloat64(ctx, value)
+
+                    else -> error("Cannot box unsupported type into Any: ${LLVMPrintTypeToString(valType).string}")
+                }
+
+            } else value
+
+            LLVMBuildStore(ctx.builder, finalValue, varInfo.ptr)
+            return finalValue
         }
+
 
 
         if (expr.op?.text == "&&" || expr.op?.text == "||") {
@@ -155,10 +175,14 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
                 result
             }
 
-            expr.NUMBER() != null  -> {
+            expr.NUMBER() != null -> {
                 val text = expr.NUMBER().text
                 return when {
-                    text.endsWith("f", true) -> LLVMConstReal(LLVMFloatTypeInContext(ctx.context), text.dropLast(1).toFloat().toDouble())
+                    text.endsWith("f", true) -> LLVMConstReal(
+                        LLVMFloatTypeInContext(ctx.context),
+                        text.dropLast(1).toFloat().toDouble()
+                    )
+
                     text.contains('.') -> LLVMConstReal(LLVMDoubleTypeInContext(ctx.context), text.toDouble())
                     else -> LLVMConstInt(LLVMInt32TypeInContext(ctx.context), text.toLong(), 0)
                 }
@@ -184,8 +208,16 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
             }
 
             expr.op != null -> {
-                val left = compileExpr(expr.expr(0))
-                val right = compileExpr(expr.expr(1))
+                var left = compileExpr(expr.expr(0))
+                var right = compileExpr(expr.expr(1))
+
+                if (LLVMUtils.isAnyType(ctx, LLVMTypeOf(left))) {
+                    left = LLVMUtils.autoUnboxToDouble(ctx, left)
+                }
+                if (LLVMUtils.isAnyType(ctx, LLVMTypeOf(right))) {
+                    right = LLVMUtils.autoUnboxToDouble(ctx, right)
+                }
+
 
                 val lType = LLVMTypeOf(left)
                 val rType = LLVMTypeOf(right)
@@ -269,29 +301,36 @@ class ExpressionCompiler(private val ctx: CompilerContext) {
         val value = compileExpr(expr)
         val type = LLVMTypeOf(value)
 
+        val unboxed = if (LLVMUtils.isAnyType(ctx, type)) {
+            LLVMUtils.unboxBool(ctx, value) // ← TEMPORARY
+        } else value
+
+        val unboxedType = LLVMTypeOf(unboxed)
+
         val result = when {
-            LLVMGetTypeKind(type) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(type) == 1 -> value
-            LLVMGetTypeKind(type) == LLVMIntegerTypeKind -> LLVMBuildICmp(
+            LLVMGetTypeKind(unboxedType) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(unboxedType) == 1 -> unboxed
+            LLVMGetTypeKind(unboxedType) == LLVMIntegerTypeKind -> LLVMBuildICmp(
                 ctx.builder,
                 LLVMIntNE,
-                value,
-                LLVMConstInt(type, 0, 0),
+                unboxed,
+                LLVMConstInt(unboxedType, 0, 0),
                 "boolify"
             )
 
-            LLVMGetTypeKind(type) == LLVMFloatTypeKind || LLVMGetTypeKind(type) == LLVMDoubleTypeKind  -> {
-                val zero = if (LLVMGetTypeKind(type) == LLVMFloatTypeKind)
+            LLVMGetTypeKind(unboxedType) == LLVMFloatTypeKind || LLVMGetTypeKind(unboxedType) == LLVMDoubleTypeKind  -> {
+                val zero = if (LLVMGetTypeKind(unboxedType) == LLVMFloatTypeKind)
                     LLVMConstReal(LLVMFloatTypeInContext(ctx.context), 0.0f.toDouble())
                 else
                     LLVMConstReal(LLVMDoubleTypeInContext(ctx.context), 0.0)
 
-                LLVMBuildFCmp(ctx.builder, LLVMRealUNE, value, zero, "boolify")
+                LLVMBuildFCmp(ctx.builder, LLVMRealUNE, unboxed, zero, "boolify")
             }
 
             else -> error("Unsupported type for condition")
         }
 
         return ValueWithBlock(result, LLVMGetInsertBlock(ctx.builder))
+
     }
 
     private fun compileShortCircuit(expr: ShchParser.ExprContext): ValueWithBlock {

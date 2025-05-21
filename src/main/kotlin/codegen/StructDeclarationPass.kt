@@ -5,8 +5,7 @@ import codegen.utils.LLVMUtils
 import context.CompilerContext
 import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.llvm.LLVM.LLVMTypeRef
-import org.bytedeco.llvm.global.LLVM.LLVMStructCreateNamed
-import org.bytedeco.llvm.global.LLVM.LLVMStructSetBody
+import org.bytedeco.llvm.global.LLVM.*
 import shch.ShchParser
 
 class StructDeclarationPass(private val ctx: CompilerContext) {
@@ -30,4 +29,22 @@ class StructDeclarationPass(private val ctx: CompilerContext) {
             println("🏗️ Struct '$name' declared with ${fieldTypes.size} field(s)")
         }
     }
+
+    fun declareBuiltinAnyStruct() {
+        val tagType = LLVMInt32TypeInContext(ctx.context) // for runtime type tag
+        val valueType = LLVMArrayType(LLVMInt8TypeInContext(ctx.context), 8) // raw storage, like union (64 bits)
+
+        val anyStructType = LLVMStructCreateNamed(ctx.context, "Any")
+        LLVMStructSetBody(anyStructType, PointerPointer(tagType, valueType), 2, 0)
+
+        ctx.declaredStructs["Any"] = StructInfo(
+            name = "Any",
+            type = anyStructType,
+            fields = mapOf("tag" to 0, "value" to 1),
+            fieldTypes = listOf(tagType, valueType)
+        )
+
+        println("🔧 Built-in dynamic struct 'Any' registered")
+    }
+
 }

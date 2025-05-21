@@ -2,10 +2,10 @@ package codegen
 
 import codegen.data.VariableInfo
 import codegen.utils.LLVMUtils
+import codegen.utils.TypeTags
 import context.CompilerContext
 import org.bytedeco.javacpp.PointerPointer
 import org.bytedeco.llvm.LLVM.LLVMTypeRef
-import org.bytedeco.llvm.global.LLVM
 import org.bytedeco.llvm.global.LLVM.*
 import shch.ShchParser
 
@@ -115,27 +115,8 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
     }
 
     private fun compilePrint(print: ShchParser.PrintStmtContext) {
-        // (same logic you already had, but remove the trailing "\n" from the format strings)
         var value = exprCompiler.compileExpr(print.expr())
-        var typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
-
-        if (typeKind == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(LLVMTypeOf(value)) == 1) {
-            value = LLVMBuildZExt(ctx.builder, value, LLVMInt32TypeInContext(ctx.context), "booltoint")
-            typeKind = LLVMIntegerTypeKind // теперь это точно целое число i32
-        }
-
-        if (typeKind == LLVMFloatTypeKind) {
-            value = LLVMBuildFPExt(ctx.builder, value, LLVMDoubleTypeInContext(ctx.context), "fpext_to_double")
-        }
-
-        // For 'print', we deliberately *do not* add the newline in the format string
-        val formatStr = when (typeKind) {
-            LLVMFloatTypeKind -> "%f"
-            LLVMDoubleTypeKind -> "%lf"
-            LLVMIntegerTypeKind -> "%d"
-            LLVMPointerTypeKind -> "%s"
-            else -> error("Unsupported type in println")
-        }
+        val isAny = LLVMUtils.isAnyType(ctx, LLVMTypeOf(value))
 
         val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
         printfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(ctx.context), 0))
@@ -148,23 +129,167 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
         val printfFunc = LLVMGetNamedFunction(ctx.module, "printf")
             ?: LLVMAddFunction(ctx.module, "printf", printfType)
 
+        if (isAny) {
+            val tag = LLVMUtils.getTag(ctx, value)
+            val parent = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder))
+
+            val intBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "print.int")
+            val floatBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "print.float")
+            val boolBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "print.bool")
+            val endBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "print.end")
+
+            val switch = LLVMBuildSwitch(ctx.builder, tag, endBB, 3)
+            LLVMAddCase(switch, LLVMConstInt(LLVMInt32TypeInContext(ctx.context), TypeTags.TAG_INT.toLong(), 0), intBB)
+            LLVMAddCase(
+                switch,
+                LLVMConstInt(LLVMInt32TypeInContext(ctx.context), TypeTags.TAG_FLOAT64.toLong(), 0),
+                floatBB
+            )
+            LLVMAddCase(
+                switch,
+                LLVMConstInt(LLVMInt32TypeInContext(ctx.context), TypeTags.TAG_BOOL.toLong(), 0),
+                boolBB
+            )
+
+            // Int
+            LLVMPositionBuilderAtEnd(ctx.builder, intBB)
+            val intVal = LLVMUtils.unboxInt(ctx, value)
+            val fmtInt = LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, "%d", "fmt_int")
+            LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(fmtInt, intVal), 2, "")
+            LLVMBuildBr(ctx.builder, endBB)
+
+            // Float
+            LLVMPositionBuilderAtEnd(ctx.builder, floatBB)
+            val floatVal = LLVMUtils.unboxFloat64(ctx, value)
+            val fmtFloat = LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, "%lf", "fmt_float")
+            LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(fmtFloat, floatVal), 2, "")
+            LLVMBuildBr(ctx.builder, endBB)
+
+            // Bool
+            LLVMPositionBuilderAtEnd(ctx.builder, boolBB)
+            val boolVal = LLVMUtils.unboxBool(ctx, value)
+            val boolInt = LLVMBuildZExt(ctx.builder, boolVal, LLVMInt32TypeInContext(ctx.context), "booltoint")
+            val fmtBool = LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, "%d", "fmt_bool")
+            LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(fmtBool, boolInt), 2, "")
+            LLVMBuildBr(ctx.builder, endBB)
+
+            LLVMPositionBuilderAtEnd(ctx.builder, endBB)
+            return
+        }
+
+        // non-Any fallback
+        var typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+
+        if (typeKind == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(LLVMTypeOf(value)) == 1) {
+            value = LLVMBuildZExt(ctx.builder, value, LLVMInt32TypeInContext(ctx.context), "booltoint")
+            typeKind = LLVMIntegerTypeKind
+        }
+        if (typeKind == LLVMFloatTypeKind) {
+            value = LLVMBuildFPExt(ctx.builder, value, LLVMDoubleTypeInContext(ctx.context), "fpext_to_double")
+        }
+
+        val formatStr = when (typeKind) {
+            LLVMFloatTypeKind -> "%f"
+            LLVMDoubleTypeKind -> "%lf"
+            LLVMIntegerTypeKind -> "%d"
+            LLVMPointerTypeKind -> "%s"
+            else -> error("Unsupported type in print")
+        }
+
         val format = LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, formatStr, "fmt")
         LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(format, value), 2, "printfcall")
     }
 
+
     private fun compilePrintln(printlnCtx: ShchParser.PrintlnStmtContext) {
         var value = exprCompiler.compileExpr(printlnCtx.expr())
-        var typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+        val isAny = LLVMUtils.isAnyType(ctx, LLVMTypeOf(value))
+
+        val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
+        printfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(ctx.context), 0))
+        val printfType = LLVMFunctionType(
+            LLVMInt32TypeInContext(ctx.context),
+            printfArgTypes,
+            1,
+            1
+        )
+        val printfFunc = LLVMGetNamedFunction(ctx.module, "printf")
+            ?: LLVMAddFunction(ctx.module, "printf", printfType)
+
+        if (isAny) {
+            println("🧩 println: dynamic Any type detected")
+            println("🛠 println type: ${LLVMPrintTypeToString(LLVMTypeOf(value)).string}")
 
 
-        if (typeKind == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(LLVMTypeOf(value)) == 1) {
+            val tag = LLVMUtils.getTag(ctx, value)
+            val parent = LLVMGetBasicBlockParent(LLVMGetInsertBlock(ctx.builder))
 
-            value = LLVMBuildZExt(ctx.builder, value, LLVMInt32TypeInContext(ctx.context), "booltoint")
-            typeKind = LLVMIntegerTypeKind // теперь это точно целое число i32
+            val intBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "println.int")
+            val floatBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "println.float")
+            val boolBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "println.bool")
+            val endBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "println.end")
+            val stringBB = LLVMAppendBasicBlockInContext(ctx.context, parent, "println.string")
+
+
+            val switch = LLVMBuildSwitch(ctx.builder, tag, endBB, 3)
+            LLVMAddCase(switch, LLVMConstInt(LLVMInt32TypeInContext(ctx.context), TypeTags.TAG_INT.toLong(), 0), intBB)
+            LLVMAddCase(
+                switch,
+                LLVMConstInt(LLVMInt32TypeInContext(ctx.context), TypeTags.TAG_FLOAT64.toLong(), 0),
+                floatBB
+            )
+            LLVMAddCase(
+                switch,
+                LLVMConstInt(LLVMInt32TypeInContext(ctx.context), TypeTags.TAG_BOOL.toLong(), 0),
+                boolBB
+            )
+            LLVMAddCase(
+                switch,
+                LLVMConstInt(LLVMInt32TypeInContext(ctx.context), TypeTags.TAG_STRING.toLong(), 0),
+                stringBB
+            )
+
+
+            // Int
+            LLVMPositionBuilderAtEnd(ctx.builder, intBB)
+            val intVal = LLVMUtils.unboxInt(ctx, value)
+            val fmtInt = LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, "%d\n", "fmt_int_ln")
+            LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(fmtInt, intVal), 2, "")
+            LLVMBuildBr(ctx.builder, endBB)
+
+            // Float
+            LLVMPositionBuilderAtEnd(ctx.builder, floatBB)
+            val floatVal = LLVMUtils.unboxFloat64(ctx, value)
+            val fmtFloat = LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, "%lf\n", "fmt_float_ln")
+            LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(fmtFloat, floatVal), 2, "")
+            LLVMBuildBr(ctx.builder, endBB)
+
+            // Bool
+            LLVMPositionBuilderAtEnd(ctx.builder, boolBB)
+            val boolVal = LLVMUtils.unboxBool(ctx, value)
+            val boolInt = LLVMBuildZExt(ctx.builder, boolVal, LLVMInt32TypeInContext(ctx.context), "booltoint")
+            val fmtBool = LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, "%d\n", "fmt_bool_ln")
+            LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(fmtBool, boolInt), 2, "")
+            LLVMBuildBr(ctx.builder, endBB)
+
+            // String
+            LLVMPositionBuilderAtEnd(ctx.builder, stringBB)
+            val strVal = LLVMUtils.unboxString(ctx, value)
+            val fmtString =
+                LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, "%s\n", "fmt_string_ln")
+            LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(fmtString, strVal), 2, "")
+            LLVMBuildBr(ctx.builder, endBB)
+
+            LLVMPositionBuilderAtEnd(ctx.builder, endBB)
+            return
         }
 
-        println("🖨️ println value type: ${LLVMPrintTypeToString(LLVMTypeOf(value)).string}")
-
+        // non-Any fallback
+        var typeKind = LLVMGetTypeKind(LLVMTypeOf(value))
+        if (typeKind == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(LLVMTypeOf(value)) == 1) {
+            value = LLVMBuildZExt(ctx.builder, value, LLVMInt32TypeInContext(ctx.context), "booltoint")
+            typeKind = LLVMIntegerTypeKind
+        }
         if (typeKind == LLVMFloatTypeKind) {
             value = LLVMBuildFPExt(ctx.builder, value, LLVMDoubleTypeInContext(ctx.context), "fpext_to_double")
         }
@@ -176,18 +301,6 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
             LLVMPointerTypeKind -> "%s\n"
             else -> error("Unsupported type in println")
         }
-
-
-        val printfArgTypes = PointerPointer<LLVMTypeRef>(1)
-        printfArgTypes.put(0, LLVMPointerType(LLVMInt8TypeInContext(ctx.context), 0))
-        val printfType = LLVMFunctionType(
-            LLVMInt32TypeInContext(ctx.context),
-            printfArgTypes,
-            1,
-            1
-        )
-        val printfFunc = LLVMGetNamedFunction(ctx.module, "printf")
-            ?: LLVMAddFunction(ctx.module, "printf", printfType)
 
         val format = LLVMUtils.buildGlobalStringPtr(ctx.context, ctx.module, ctx.builder, formatStr, "fmt_ln")
         LLVMBuildCall2(ctx.builder, printfType, printfFunc, PointerPointer(format, value), 2, "printfcall")
@@ -255,8 +368,27 @@ class StatementCompiler(private val ctx: CompilerContext, private val exprCompil
 
         decl.expr()?.let {
             val value = exprCompiler.compileExpr(it)
-            LLVMBuildStore(ctx.builder, value, alloca)
+            val finalValue = if (LLVMUtils.isAnyType(ctx, llvmType)) {
+                val valType = LLVMTypeOf(value)
+                when {
+                    LLVMGetTypeKind(valType) == LLVMIntegerTypeKind && LLVMGetIntTypeWidth(valType) == 1 ->
+                        LLVMUtils.boxBool(ctx, value)
+
+                    LLVMGetTypeKind(valType) == LLVMIntegerTypeKind ->
+                        LLVMUtils.boxInt(ctx, value)
+
+                    LLVMGetTypeKind(valType) == LLVMDoubleTypeKind ->
+                        LLVMUtils.boxFloat64(ctx, value)
+
+                    LLVMGetTypeKind(valType) == LLVMPointerTypeKind ->
+                        LLVMUtils.boxString(ctx, value)
+
+                    else -> error("Cannot box unsupported type into Any: ${LLVMPrintTypeToString(valType).string}")
+                }
+            } else value
+            LLVMBuildStore(ctx.builder, finalValue, alloca)
         }
+
     }
 
     private fun compileAssign(assign: ShchParser.AssignStmtContext) {
